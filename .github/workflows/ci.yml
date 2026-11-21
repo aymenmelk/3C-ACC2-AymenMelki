@@ -87,15 +87,15 @@ jobs:
         run: |
           (cd backend && chmod +x mvnw && ./mvnw -B -q package -DskipTests)
           (cd frontend && npm ci --no-audit --no-fund && npm run build)
-          docker build -f backend/Dockerfile.jenkins  -t aymenbay/aymenmelki-3c-acc2-gestionprojets-backend:ci  ./backend
-          docker build -f frontend/Dockerfile.jenkins -t aymenbay/aymenmelki-3c-acc2-gestionprojets-frontend:ci ./frontend
+          docker build -f backend/Dockerfile.jenkins  -t aymenbay/aymenmelki-3c-acc2-gestionprojets-backend:42  ./backend
+          docker build -f frontend/Dockerfile.jenkins -t aymenbay/aymenmelki-3c-acc2-gestionprojets-frontend:42 ./frontend
       - uses: helm/kind-action@v1
         with:
           cluster_name: devops
       - name: Load images into the cluster and deploy (kubectl apply -k k8s)
         run: |
-          kind load docker-image --name devops aymenbay/aymenmelki-3c-acc2-gestionprojets-backend:ci aymenbay/aymenmelki-3c-acc2-gestionprojets-frontend:ci
-          sed -i 's#newTag: latest#newTag: ci#' k8s/kustomization.yaml
+          kind load docker-image --name devops aymenbay/aymenmelki-3c-acc2-gestionprojets-backend:42 aymenbay/aymenmelki-3c-acc2-gestionprojets-frontend:42
+          IMAGE_TAG=42; sed -i "s#newTag: latest#newTag: \"${IMAGE_TAG}\"#" k8s/kustomization.yaml   # same command as the Jenkinsfile (numeric tag)
           kubectl apply -k k8s
           kubectl -n gestionprojets rollout status deployment/mysql --timeout=300s
           kubectl -n gestionprojets rollout status deployment/backend --timeout=600s

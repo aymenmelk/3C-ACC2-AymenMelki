@@ -172,7 +172,8 @@ pipeline {
                     docker compose -f docker-compose.yml down || true
 
                     # Deploy exactly the images built (and pushed) by this build
-                    sed -i "s#aymenbay/aymenmelki#${HUB_USER}/aymenmelki#g; s#newTag: latest#newTag: ${IMAGE_TAG}#" k8s/kustomization.yaml
+                    sed -i "s#aymenbay/aymenmelki#${HUB_USER}/aymenmelki#g; s#newTag: latest#newTag: \\"${IMAGE_TAG}\\"#" k8s/kustomization.yaml
+                    grep -A1 "name: .*gestionprojets" k8s/kustomization.yaml
                     $K apply -k k8s
 
                     $K -n "$K8S_NS" rollout status deployment/mysql      --timeout=300s
