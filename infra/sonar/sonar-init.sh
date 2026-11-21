@@ -1,7 +1,7 @@
 #!/bin/sh
 # One-shot SonarQube bootstrap (runs in the "sonar-init" container):
 #  1. waits for SonarQube, 2. changes the default admin/admin password,
-#  3. generates an analysis token for Jenkins, 4. creates the Quality Gate webhook -> Jenkins.
+#  3. generates an analysis token for Jenkins, 4. allows + creates the Quality Gate webhook -> Jenkins.
 # Idempotent: safe to run again.
 set -eu
 SONAR=http://sonarqube:9000
@@ -32,6 +32,12 @@ if [ ! -s "$TOKEN_FILE" ] || [ "$(cat "$TOKEN_FILE")" = "pending" ]; then
 else
   echo "[sonar-init] token already present"
 fi
+
+# Jenkins lives on the private Docker network (http://jenkins:8080). Recent SonarQube versions block
+# webhooks to private addresses by default (anti-SSRF); allow them for this local lab setup.
+curl -sf -u "$AUTH" -X POST "$SONAR/api/settings/set" \
+  --data-urlencode "key=sonar.validateWebhooks" --data-urlencode "value=false" \
+  && echo "[sonar-init] local webhooks allowed (sonar.validateWebhooks=false)"
 
 if ! curl -sf -u "$AUTH" "$SONAR/api/webhooks/list" | jq -e '.webhooks[] | select(.name=="jenkins")' >/dev/null; then
   curl -sf -u "$AUTH" -X POST "$SONAR/api/webhooks/create" \
