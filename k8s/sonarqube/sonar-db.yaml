@@ -1,0 +1,70 @@
+# PostgreSQL de SonarQube
+apiVersion: v1
+kind: Secret
+metadata:
+  name: sonar-db-secret
+type: Opaque
+stringData:
+  POSTGRES_USER: sonar
+  POSTGRES_PASSWORD: sonar
+  POSTGRES_DB: sonar
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sonar-db-data
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sonar-db
+  labels: { app: sonar-db }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: sonar-db }
+  template:
+    metadata:
+      labels: { app: sonar-db }
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - secretRef: { name: sonar-db-secret }
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - containerPort: 5432
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U sonar -d sonar"]
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 512Mi }
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: sonar-db-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sonar-db
+spec:
+  selector: { app: sonar-db }
+  ports:
+    - port: 5432
+      targetPort: 5432

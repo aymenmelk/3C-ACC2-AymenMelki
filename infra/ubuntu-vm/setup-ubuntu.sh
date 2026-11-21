@@ -60,7 +60,10 @@ fi
 step "6/7 Maven on the command line (steps 3 of the brief: clean, install, package)"
 (cd "$REPO_DIR/backend" && mvn -B clean install)
 
-step "7/7 DevOps toolchain: Jenkins, SonarQube, Prometheus, Grafana"
+step "7/7 DevOps toolchain: SonarQube POD (Kubernetes), then Jenkins, Prometheus, Grafana"
+kubectl apply -k "$REPO_DIR/k8s/sonarqube"
+echo "waiting for the SonarQube POD (first start: a few minutes)..."
+kubectl -n sonarqube rollout status deployment/sonarqube --timeout=900s
 cd "$REPO_DIR/infra"
 if [ ! -f .env ]; then
   cp .env.example .env
@@ -80,7 +83,7 @@ cat <<MSG
 ==============================================================================
  Done. From Windows (or inside the VM), open:
    Jenkins     http://$VM_IP:8081   (admin / admin)  -> gestionprojets-pipeline -> Build Now
-   SonarQube   http://$VM_IP:9000   (admin / Admin_DevOps_2026!)
+   SonarQube   http://$VM_IP:30900  (POD, admin / Admin_DevOps_2026!)
    Grafana     http://$VM_IP:3000   (admin / admin)
 
  After the first pipeline run, the Kubernetes PODs:

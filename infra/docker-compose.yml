@@ -1,12 +1,15 @@
-# DevOps toolchain: Jenkins + SonarQube + Prometheus + Grafana
+# DevOps toolchain: Jenkins + Prometheus + Grafana (+ ngrok)
+# SonarQube runs as a Kubernetes POD (architecture of the brief):  kubectl apply -k ../k8s/sonarqube
 #   cd infra && cp .env.example .env   (then edit .env)
 #   docker compose up -d --build
-# Jenkins http://localhost:8081 | SonarQube http://localhost:9000 | Prometheus http://localhost:9090 | Grafana http://localhost:3000
+# Jenkins http://localhost:8081 | SonarQube POD http://localhost:30900 | Prometheus http://localhost:9090 | Grafana http://localhost:3000
+# Without Kubernetes: COMPOSE_PROFILES=sonar-docker and SONAR_URL=http://sonarqube:9000 in .env (SonarQube in Docker, port 9000)
 name: devops
 
 services:
   sonar-db:
     image: postgres:16-alpine
+    profiles: ["sonar-docker"]
     container_name: sonar-db
     restart: unless-stopped
     environment:
@@ -23,6 +26,7 @@ services:
 
   sonarqube:
     image: sonarqube:community
+    profiles: ["sonar-docker"]
     container_name: sonarqube
     restart: unless-stopped
     depends_on:
@@ -47,12 +51,17 @@ services:
     image: alpine:3.22
     container_name: sonar-init
     depends_on:
-      - sonarqube
+      sonarqube:
+        condition: service_started
+        required: false
     environment:
+      SONAR_URL: ${SONAR_URL:-http://host.docker.internal:30900}
       SONAR_ADMIN_PASSWORD: ${SONAR_ADMIN_PASSWORD:-Admin_DevOps_2026!}
     volumes:
       - ./sonar/sonar-init.sh:/sonar-init.sh:ro
       - jenkins_secrets:/var/jenkins_secrets
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     entrypoint: ["sh", "/sonar-init.sh"]
     restart: "no"
 
@@ -80,6 +89,7 @@ services:
     environment:
       KUBECONFIG_SRC: /root/.kube-host/config
       KUBE_CONTEXT: ${KUBE_CONTEXT:-docker-desktop}
+      SONAR_URL: ${SONAR_URL:-http://host.docker.internal:30900}
     extra_hosts:
       - "host.docker.internal:host-gateway"
       - "kubernetes.docker.internal:host-gateway"

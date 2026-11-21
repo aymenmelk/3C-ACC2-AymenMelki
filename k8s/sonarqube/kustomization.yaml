@@ -1,0 +1,9 @@
+# POD SonarQube (architecture du sujet) — déployé une fois, avant Jenkins :
+#   kubectl apply -k k8s/sonarqube
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: sonarqube
+resources:
+  - namespace.yaml
+  - sonar-db.yaml
+  - sonarqube.yaml

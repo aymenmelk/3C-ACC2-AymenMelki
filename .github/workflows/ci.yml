@@ -68,7 +68,7 @@ jobs:
         run: docker compose down -v
 
   kubernetes:
-    name: Kubernetes (kind) - PODs Spring, MySQL, Angular, Monitoring
+    name: Kubernetes (kind) - PODs Spring, MySQL, Angular, Monitoring, SonarQube
     runs-on: ubuntu-latest
     needs: [backend, frontend]
     steps:
@@ -102,6 +102,25 @@ jobs:
           kubectl -n gestionprojets rollout status deployment/frontend --timeout=300s
           kubectl -n gestionprojets rollout status deployment/monitoring --timeout=300s
           kubectl -n gestionprojets get pods,svc,pvc -o wide
+      - name: SonarQube POD + sonar-init against it
+        run: |
+          docker pull -q sonarqube:community && docker pull -q postgres:16-alpine && docker pull -q busybox:1.37
+          kind load docker-image --name devops sonarqube:community postgres:16-alpine busybox:1.37
+          kubectl apply -k k8s/sonarqube
+          kubectl -n sonarqube rollout status deployment/sonar-db --timeout=300s
+          kubectl -n sonarqube rollout status deployment/sonarqube --timeout=900s
+          kubectl -n sonarqube get pods,svc,pvc
+          kubectl -n sonarqube port-forward svc/sonarqube 19000:9000 >/dev/null 2>&1 &
+          sleep 5
+          mkdir -p /tmp/secrets
+          docker run --rm --network host -e SONAR_URL=http://localhost:19000 -e JENKINS_WEBHOOK_URL=http://jenkins.example:8081/sonarqube-webhook/ \
+            -v "$PWD/infra/sonar/sonar-init.sh:/sonar-init.sh:ro" -v /tmp/secrets:/var/jenkins_secrets alpine:3.22 sh /sonar-init.sh
+          TOKEN=$(cat /tmp/secrets/sonar-token)
+          curl -fsS -u "$TOKEN:" localhost:19000/api/authentication/validate | grep -q '"valid":true' && echo "SonarQube POD token OK"
+          # second run must keep the valid token (idempotent)
+          docker run --rm --network host -e SONAR_URL=http://localhost:19000 -e JENKINS_WEBHOOK_URL=http://jenkins.example:8081/sonarqube-webhook/ \
+            -v "$PWD/infra/sonar/sonar-init.sh:/sonar-init.sh:ro" -v /tmp/secrets:/var/jenkins_secrets alpine:3.22 sh /sonar-init.sh | grep -q "existing token is valid"
+          [ "$(cat /tmp/secrets/sonar-token)" = "$TOKEN" ] && echo "sonar-init is idempotent"
       - name: Smoke test the PODs
         run: |
           kubectl -n gestionprojets port-forward svc/frontend 18080:80 >/dev/null 2>&1 &
@@ -133,7 +152,10 @@ jobs:
         working-directory: infra
         run: |
           cp .env.example .env
-          sed -i '/^GIT_REPO_URL=/d' .env
+          sed -i '/^GIT_REPO_URL=/d; /^SONAR_URL=/d' .env
+          # CI has no Kubernetes next to Jenkins: SonarQube runs in Docker here (same compose file, profile)
+          echo "COMPOSE_PROFILES=sonar-docker" >> .env
+          echo "SONAR_URL=http://sonarqube:9000" >> .env
           echo "GIT_REPO_URL=https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" >> .env
       - name: Start toolchain
         working-directory: infra
