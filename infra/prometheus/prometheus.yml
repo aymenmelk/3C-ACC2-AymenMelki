@@ -1,0 +1,22 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # Spring Boot backend (deployed by the pipeline, port 8080 on the host)
+  - job_name: spring-backend
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["host.docker.internal:8080"]
+        labels:
+          app: gestionprojets-backend
+
+  # Jenkins (Prometheus plugin)
+  - job_name: jenkins
+    metrics_path: /prometheus/
+    static_configs:
+      - targets: ["jenkins:8080"]

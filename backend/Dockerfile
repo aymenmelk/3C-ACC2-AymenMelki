@@ -6,7 +6,7 @@ COPY .mvn .mvn
 COPY mvnw mvnw.cmd ./
 RUN mvn dependency:go-offline -B
 COPY src src
-RUN mvn package -B
+RUN mvn package -B -DskipTests
 
 FROM eclipse-temurin:17-jre
 

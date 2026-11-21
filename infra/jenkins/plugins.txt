@@ -1,0 +1,14 @@
+configuration-as-code
+workflow-aggregator
+pipeline-stage-view
+pipeline-utility-steps
+git
+github
+job-dsl
+credentials-binding
+sonar
+junit
+timestamper
+ws-cleanup
+mailer
+prometheus

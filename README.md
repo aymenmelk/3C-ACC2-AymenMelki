@@ -1,125 +1,163 @@
-# DevOps-AppGestionDesProjets
+# 3C-ACC2-AymenMelki — Projet DevOps
 
-Ce dépôt contient un projet **Spring Boot** (backend) et **Angular** (frontend) utilisé dans le cadre du module **DevOps**.  
-Il sert de support pratique pour mettre en œuvre un pipeline Jenkins basé sur l'intégration continue (CI) et la livraison continue (CD).
+[![CI](https://github.com/aymenmelk/3C-ACC2-AymenMelki/actions/workflows/ci.yml/badge.svg)](https://github.com/aymenmelk/3C-ACC2-AymenMelki/actions/workflows/ci.yml)
 
-L'objectif principal est de permettre aux étudiants de :
-- Configurer un pipeline **SCM** (Source Code Management) avec Jenkins
-- Automatiser le **build** du projet (Maven + npm)
-- Exécuter des **tests unitaires** (si disponibles)
-- Générer un **livrable** déployable
+Chaîne DevOps complète autour d'une application **Spring Boot 4 + Angular 22** de gestion de projets
+(Entreprises, Équipes, Projets, Projets détaillés) : **Maven → Git → SonarQube → Jenkins → Docker (Spring + MySQL) → Grafana**.
 
----
-
-## 📁 Structure du projet
-
-```
-DevOps-AppGestionDesProjets/
-├── backend/          # API REST Spring Boot (Java 17, Maven)
-│   ├── src/
-│   │   └── main/java/tn/esprit/backend/
-│   │       ├── entity/
-│   │       ��── repository/
-│   │       ├── service/
-│   │       └── controller/
-│   └── pom.xml
-├── frontend/         # Application Angular 22 (Node.js, npm)
-│   ├── src/
-│   │   └── app/
-│   │       ��── models/
-│   │       ├── services/
-│   │       ├── components/
-│   │       └── pages/
-│   └── package.json
-└── README.md
-```
-
----
-
-## 🧩 Modèle de données
-
-Le projet simule une application de gestion de projets pour une organisation composée d'entreprises, d'équipes et de projets.
-
-| Entité | Description |
+| | |
 |---|---|
-| `Entreprise` | Possède un nom et une adresse, regroupe plusieurs équipes |
-| `Equipe` | Appartient à une entreprise, a un nom et une spécialité, travaille sur plusieurs projets |
-| `Projet` | Sujet de travail partagé entre plusieurs équipes |
-| `ProjetDetaille` | Détails techniques d'un projet : technologie, coût provisoire, date de début |
+| Étudiant | Aymen Melki — 3C-ACC2 |
+| Repo Git (`classe_nomEtudiant`) | `3C-ACC2-AymenMelki` |
+| Images Docker (`nomprenom-classe-nomProjet`) | `aymenmelk/aymenmelki-3c-acc2-gestionprojets-backend` et `…-frontend` |
+
+> Les noms d'images Docker doivent être en minuscules, d'où `aymenmelki-3c-acc2-…`.
 
 ---
 
-## ⚙️ Prérequis
+## 🏗️ Architecture
 
-Avant de lancer le projet, vérifier que les outils suivants sont installés :
+```
+GitHub ──(poll / webhook)──▶ Jenkins ──▶ mvnw clean/compile/test/package/install
+                                │      ──▶ npm ci / test:ci / build
+                                │      ──▶ SonarQube (+ Quality Gate, couverture JaCoCo + lcov)
+                                │      ──▶ docker build ──▶ Docker Hub
+                                └──────▶ docker compose up ──▶ MySQL 8.4 + Spring Boot (8080) + Angular/nginx (4200)
+                                                                        │ /actuator/prometheus
+                                                 Prometheus (9090) ◀────┘  ◀── Jenkins /prometheus
+                                                        │
+                                                 Grafana (3000) — dashboard « Projet DevOps » provisionné
+```
 
-| Outil | Version minimale | Vérification |
+| Dossier / fichier | Rôle |
+|---|---|
+| `backend/` | API REST Spring Boot 4.1 (Java 17), MySQL, Actuator + Micrometer Prometheus, JaCoCo |
+| `frontend/` | Angular 22, tests Vitest + couverture, image nginx |
+| `docker-compose.yml` | **Livraison continue** : MySQL + backend + frontend |
+| `infra/docker-compose.yml` | **Outils DevOps** : Jenkins, SonarQube (+ PostgreSQL), Prometheus, Grafana |
+| `infra/jenkins/` | Image Jenkins (JDK 21, Node 24, Docker CLI) + plugins + **Configuration as Code** (job créé automatiquement) |
+| `infra/sonar/sonar-init.sh` | Configure SonarQube automatiquement (mot de passe admin, token Jenkins, webhook Quality Gate) |
+| `infra/prometheus/`, `infra/grafana/` | Scraping + datasource et dashboard Grafana provisionnés |
+| `Jenkinsfile` | Pipeline CI/CD |
+| `.github/workflows/ci.yml` | Même chaîne sur GitHub Actions + test end-to-end de Jenkins/Sonar/Grafana |
+
+---
+
+## ⚙️ Prérequis (Windows)
+
+- **Docker Desktop** (backend WSL2) avec **≥ 6 Go de RAM** (Settings → Resources) — SonarQube est gourmand
+- **Git**
+- Pour lancer sans Docker uniquement : JDK 17+ et Node ≥ 22.22 / 24.15
+
+Rien d'autre à installer : Jenkins, SonarQube, MySQL, Prometheus et Grafana tournent en conteneurs, et Maven est fourni par `mvnw`.
+
+---
+
+## 🚀 Démarrage rapide
+
+### 1. Cloner
+
+```powershell
+git clone https://github.com/aymenmelk/3C-ACC2-AymenMelki.git
+cd 3C-ACC2-AymenMelki
+```
+
+### 2. Lancer les outils DevOps (Jenkins + SonarQube + Prometheus + Grafana)
+
+```powershell
+cd infra
+copy .env.example .env      # puis éditer .env : DOCKERHUB_TOKEN, (optionnel) SMTP_*
+docker compose up -d --build
+```
+
+Le premier démarrage prend quelques minutes (téléchargement des images + plugins Jenkins).
+`sonar-init` configure SonarQube tout seul, puis Jenkins démarre déjà configuré.
+
+| Outil | URL | Identifiants par défaut |
 |---|---|---|
-| Java JDK | 17 | `java -version` |
-| Maven | 3.8+ | `mvn -version` |
-| Node.js | 18+ | `node -v` |
-| npm | 9+ | `npm -v` |
-| Angular CLI | 22+ | `ng version` |
-| PostgreSQL | 16+ | `psql --version` |
+| Jenkins | http://localhost:8081 | `admin` / `admin` |
+| SonarQube | http://localhost:9000 | `admin` / `Admin_DevOps_2026!` |
+| Prometheus | http://localhost:9090 | — |
+| Grafana | http://localhost:3000 | `admin` / `admin` |
 
----
+### 3. Lancer le pipeline
 
-## 🗄️ Configuration de la base de données
+Jenkins → job **`gestionprojets-pipeline`** → **Build Now**.
+Le pipeline construit, teste, analyse, crée les images, les pousse sur Docker Hub puis **déploie** l'application :
 
-Le backend se connecte à une base de données **PostgreSQL**.  
-Les paramètres de connexion se trouvent dans `backend/src/main/resources/application.properties` :
+- Frontend : http://localhost:4200
+- Backend : http://localhost:8080/entreprise/all
+- Santé / métriques : http://localhost:8080/actuator/health, http://localhost:8080/actuator/prometheus
+- MySQL : `localhost:3307` (3307 car un MySQL local occupe souvent 3306)
 
-```properties
-spring.datasource.url=jdbc:postgresql://localhost:5432/test_db
-spring.datasource.username=postgres
-spring.datasource.password=postgres
-spring.jpa.hibernate.ddl-auto=update
+Ensuite le job vérifie GitHub toutes les 5 minutes (`pollSCM`) : chaque `git push` relance la chaîne.
+
+### 4. Monitoring
+
+Grafana → Dashboards → **DevOps → « Projet DevOps — Gestion des Projets »** :
+requêtes HTTP/s, latence p95, erreurs 5xx, mémoire JVM, threads, connexions MySQL (HikariCP), état et durée des builds Jenkins.
+
+### Lancer seulement l'application (sans Jenkins)
+
+```powershell
+docker compose up -d --build
 ```
 
-> Créer la base de données `test_db` avant le premier démarrage si vous lancez PostgreSQL localement.  
-> Modifier `username` et `password` selon votre configuration PostgreSQL locale.
+---
+
+## 🔁 Le pipeline Jenkins
+
+| Étape | Commande |
+|---|---|
+| Checkout | `checkout scm` |
+| Maven : clean → compile → test → package → install | `./mvnw clean`, `compile`, `test` (rapports JUnit + JaCoCo), `package`, `install` |
+| Frontend | `npm ci`, `npm run test:ci` (Vitest + lcov), `npm run build` |
+| SonarQube | `npx @sonar/scan` (lit `sonar-project.properties`) |
+| Quality Gate | `waitForQualityGate` (webhook Sonar → Jenkins créé automatiquement) |
+| Docker build | `aymenmelk/aymenmelki-3c-acc2-gestionprojets-{backend,frontend}:<build>` + `latest` |
+| Docker push | Docker Hub (identifiants `dockerhub-creds` depuis `infra/.env`) |
+| Deploy | `docker compose up -d` (Spring + MySQL + Angular) |
+| Smoke test | `/actuator/health`, `/entreprise/all`, frontend, métriques Prometheus |
+| Notification | e-mail si `NOTIFY_EMAIL` + `SMTP_*` sont renseignés |
+
+### Améliorations du sujet réalisées
+
+- ✅ Notification e-mail Jenkins (Gmail : utiliser un *mot de passe d'application*)
+- ✅ Webhook : trigger `githubPush()` dans le Jenkinsfile. Jenkins tournant en local, exposez-le avec **ngrok** :
+  `ngrok http 8081`, puis GitHub → Settings → Webhooks → `https://<id>.ngrok-free.app/github-webhook/` (content type `application/json`)
+- ✅ IaC : Jenkins entièrement configuré par code (JCasC + Job DSL), SonarQube configuré par script, Grafana provisionné
+- ✅ Partie Angular déployée dans un conteneur Docker (nginx)
+- ✅ CI GitHub Actions qui rejoue la même chaîne de bout en bout
 
 ---
 
-## 🚀 Lancer le projet
+## 🧪 Tests
 
-### 1. Backend — Spring Boot
+| | Contenu | Commande |
+|---|---|---|
+| Backend — unitaires | Services (Mockito), cas « introuvable » → 404 | `cd backend && ./mvnw test` |
+| Backend — web | Les 4 contrôleurs REST (`@WebMvcTest` + MockMvc) | |
+| Backend — JPA | Requêtes dérivées des repositories (`@DataJpaTest`, H2) | |
+| Backend — intégration | Contexte complet + H2 (mode MySQL) : CRUD, affectations, actuator | |
+| Frontend | 4 services HTTP + 4 pages + composant racine (39 tests) | `cd frontend && npm run test:ci` |
 
-```bash
+Rapports de couverture : `backend/target/site/jacoco/index.html` et `frontend/coverage/frontend/lcov-report/index.html`.
+
+---
+
+## 🖥️ Lancer en local sans Docker
+
+```powershell
+# Backend (MySQL local sur 3306, utilisateur root/root par défaut, base créée automatiquement)
 cd backend
+$env:SPRING_DATASOURCE_PASSWORD="votre_mot_de_passe_mysql"
+.\mvnw.cmd spring-boot:run
 
-mvn spring-boot:run
-```
-
-Le backend démarre sur **http://localhost:8080**
-
-Pour vérifier : ouvrir `http://localhost:8080/entreprise/all` → doit retourner `[]`
-
-### 2. Frontend — Angular
-
-> Ouvrir un **second terminal** sans fermer celui du backend.
-
-```bash
+# Frontend (autre terminal)
 cd frontend
-
-# Installer les dépendances (première fois uniquement)
 npm install
-
-# Lancer le serveur de développement
-ng serve -o
+npm start          # http://localhost:4200
 ```
-
-L'application s'ouvre automatiquement sur **http://localhost:4200**
-
-### 3. Docker Compose
-
-Docker builds the backend and frontend with multi-stage builds and starts PostgreSQL before the backend:
-
-```bash
-docker compose up --build
-```
-
-The frontend is available at **http://localhost:4200**, the backend at **http://localhost:8080**, and PostgreSQL at **localhost:5432**.
 
 ---
 
@@ -166,73 +204,21 @@ The frontend is available at **http://localhost:4200**, the backend at **http://
 
 ---
 
-## 🔧 Intégration Jenkins (CI/CD)
-
-Ce projet est conçu pour être intégré dans un pipeline Jenkins. Un `Jenkinsfile` peut être ajouté à la racine du dépôt pour automatiser les étapes suivantes :
-
-```
-Checkout SCM → Build Backend (mvn) → Tests → Build Frontend (npm) → Archive Artifacts
-```
-
-Exemple de pipeline :
-
-```groovy
-pipeline {
-    agent any
-    stages {
-        stage('Checkout') {
-            steps { checkout scm }
-        }
-        stage('Build Backend') {
-            steps {
-                dir('backend') {
-                    sh 'mvn clean package -DskipTests'
-                }
-            }
-        }
-        stage('Test Backend') {
-            steps {
-                dir('backend') {
-                    sh 'mvn test'
-                }
-            }
-        }
-        stage('Build Frontend') {
-            steps {
-                dir('frontend') {
-                    sh 'npm install'
-                    sh 'npm run build'
-                }
-            }
-        }
-        stage('Archive') {
-            steps {
-                archiveArtifacts artifacts: 'backend/target/*.jar', fingerprint: true
-            }
-        }
-    }
-}
-```
+Les routes `assign-*` renvoient **404** si l'un des identifiants n'existe pas.
+Endpoints de supervision : `/actuator/health`, `/actuator/info`, `/actuator/metrics`, `/actuator/prometheus`.
 
 ---
 
-## 🛠️ Stack technique
+## 🛠️ Dépannage
 
-| Couche | Technologie |
+| Problème | Solution |
 |---|---|
-| Backend | Spring Boot 4.1.0, Spring Data JPA, Spring Web MVC |
-| Base de données | PostgreSQL 16 |
-| ORM | Hibernate |
-| Utilitaires | Lombok |
-| Frontend | Angular 22 (Standalone Components) |
-| HTTP Client | Angular HttpClient |
-| Build backend | Apache Maven |
-| Build frontend | npm / Angular CLI |
-| CI/CD | Jenkins |
-| Conteneurisation | Docker Compose, multi-stage Dockerfiles |
+| SonarQube redémarre en boucle | Augmenter la RAM de Docker Desktop (≥ 6 Go) |
+| `Quality Gate` bloque | Vérifier `docker logs sonar-init` (webhook créé ?) |
+| Port déjà utilisé (3306/8080/…) | Changer le port côté hôte dans le `docker-compose.yml` (ex. `MYSQL_HOST_PORT`) |
+| `docker push` échoue → build UNSTABLE | Renseigner `DOCKERHUB_TOKEN` dans `infra/.env` puis `docker compose up -d jenkins` |
+| Repo GitHub privé | Rendre le repo public, ou ajouter des identifiants GitHub au job |
 
 ---
 
-## 👤 Auteur
-
-**ESPRIT — UP ASI**  
+Base du projet : application de gestion de projets fournie pour le module DevOps (ESPRIT).

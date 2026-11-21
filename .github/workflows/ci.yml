@@ -1,0 +1,112 @@
+# Mirror of the Jenkins pipeline on GitHub Actions + an end-to-end test of the whole DevOps toolchain.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  backend:
+    name: Backend (Maven clean install + JaCoCo)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - name: mvn clean install
+        working-directory: backend
+        run: chmod +x mvnw && ./mvnw -B clean install
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-reports
+          path: |
+            backend/target/surefire-reports
+            backend/target/site/jacoco
+
+  frontend:
+    name: Frontend (Vitest + coverage + build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - working-directory: frontend
+        run: |
+          npm ci --no-audit --no-fund
+          npm run test:ci
+          npm run build
+
+  app-stack:
+    name: Docker compose (Spring + MySQL + Angular) smoke test
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - name: docker compose up
+        run: docker compose up -d --build
+      - name: Smoke test the API, frontend and metrics
+        run: |
+          for i in $(seq 1 60); do curl -fs localhost:8080/actuator/health | grep -q '"UP"' && break; sleep 3; done
+          curl -fsS localhost:8080/actuator/health; echo
+          curl -fsS -X POST localhost:8080/entreprise/add -H 'Content-Type: application/json' -d '{"nom":"Esprit","adresse":"Tunis"}'; echo
+          curl -fsS localhost:8080/entreprise/all | grep -q Esprit && echo "MySQL persistence OK"
+          curl -fsS -o /dev/null localhost:4200 && echo "Frontend OK"
+          curl -fsS localhost:8080/actuator/prometheus | grep -q http_server_requests && echo "Prometheus metrics OK"
+      - if: failure()
+        run: docker compose logs --tail=200
+      - if: always()
+        run: docker compose down -v
+
+  devops-toolchain:
+    name: Jenkins + SonarQube + Grafana end-to-end (runs the real Jenkinsfile)
+    runs-on: ubuntu-latest
+    needs: [app-stack]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare infra/.env
+        working-directory: infra
+        run: |
+          cp .env.example .env
+          sed -i '/^GIT_REPO_URL=/d' .env
+          echo "GIT_REPO_URL=https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" >> .env
+      - name: Start toolchain
+        working-directory: infra
+        run: docker compose up -d --build
+      - name: Wait for Jenkins + check JCasC created the job
+        run: |
+          for i in $(seq 1 90); do curl -fs -o /dev/null -u admin:admin localhost:8081/api/json && break; sleep 5; done
+          curl -fsS -u admin:admin localhost:8081/job/gestionprojets-pipeline/api/json | grep -q gestionprojets-pipeline
+          docker logs sonar-init
+      - name: Trigger the pipeline and wait for the result
+        run: |
+          J=localhost:8081; C=$(mktemp)
+          CRUMB=$(curl -fs -c $C -u admin:admin "$J/crumbIssuer/api/xml?xpath=concat(//crumbRequestField,\":\",//crumb)")
+          curl -fsS -b $C -u admin:admin -H "$CRUMB" -X POST "$J/job/gestionprojets-pipeline/build"
+          for i in $(seq 1 30); do curl -fs -u admin:admin "$J/job/gestionprojets-pipeline/1/api/json" -o /dev/null && break; sleep 5; done
+          while curl -fs -u admin:admin "$J/job/gestionprojets-pipeline/1/api/json" | grep -q '"building":true'; do sleep 15; done
+          RESULT=$(curl -fs -u admin:admin "$J/job/gestionprojets-pipeline/1/api/json" | sed -n 's/.*"result":"\([A-Z]*\)".*/\1/p')
+          curl -fs -u admin:admin "$J/job/gestionprojets-pipeline/1/consoleText" | tail -150
+          echo "Jenkins build result: $RESULT"
+          # UNSTABLE = everything passed except the Docker Hub push (no real token in CI)
+          [ "$RESULT" = "SUCCESS" ] || [ "$RESULT" = "UNSTABLE" ]
+      - name: Check SonarQube analysis, Prometheus targets and Grafana dashboard
+        run: |
+          curl -fsS -u 'admin:Admin_DevOps_2026!' "localhost:9000/api/qualitygates/project_status?projectKey=aymenmelki-3c-acc2-gestionprojets"; echo
+          curl -fsS -u 'admin:Admin_DevOps_2026!' "localhost:9000/api/measures/component?component=aymenmelki-3c-acc2-gestionprojets&metricKeys=coverage,bugs,vulnerabilities,code_smells"; echo
+          sleep 20
+          curl -fsS localhost:9090/api/v1/targets | grep -o '"job":"[a-z-]*"[^}]*"health":"[a-z]*"' | sort -u || true
+          curl -fsS 'localhost:9090/api/v1/query?query=up' ; echo
+          curl -fsS -u admin:admin localhost:3000/api/dashboards/uid/gestionprojets-devops | grep -q '"uid":"gestionprojets-devops"' && echo "Grafana dashboard OK"
+      - if: failure()
+        working-directory: infra
+        run: docker compose logs --tail=150

@@ -1,6 +1,5 @@
 package tn.esprit.backend.entity;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -23,7 +22,7 @@ public class ProjetDetaille {
 
     private LocalDate dateDebut;
 
-    @JsonIgnore
+    // Serialized (Projet's own collections are @JsonIgnore, so no cycle) so the frontend can read/send projet.id
     @ManyToOne
     private Projet projet;
 }

@@ -4,6 +4,7 @@ import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 import tn.esprit.backend.entity.Projet;
 import tn.esprit.backend.entity.ProjetDetaille;
+import tn.esprit.backend.exception.ResourceNotFoundException;
 import tn.esprit.backend.repository.ProjetDetailleRepository;
 import tn.esprit.backend.repository.ProjetRepository;
 import tn.esprit.backend.service.IProjetDetailleService;
@@ -49,8 +50,10 @@ public class ProjetDetailleServiceImpl implements IProjetDetailleService {
 
     @Override
     public ProjetDetaille assignProjetDetailleToProjet(Long projetDetailleId, Long projetId) {
-        ProjetDetaille projetDetaille = projetDetailleRepository.findById(projetDetailleId).orElse(null);
-        Projet projet = projetRepository.findById(projetId).orElse(null);
+        ProjetDetaille projetDetaille = projetDetailleRepository.findById(projetDetailleId)
+                .orElseThrow(() -> new ResourceNotFoundException("ProjetDetaille", projetDetailleId));
+        Projet projet = projetRepository.findById(projetId)
+                .orElseThrow(() -> new ResourceNotFoundException("Projet", projetId));
         projetDetaille.setProjet(projet);
         return projetDetailleRepository.save(projetDetaille);
     }
