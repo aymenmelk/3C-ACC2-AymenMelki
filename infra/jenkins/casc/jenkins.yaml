@@ -16,7 +16,7 @@ jenkins:
     - envVars:
         env:
           - key: "DOCKERHUB_USER"
-            value: "${DOCKERHUB_USER:-aymenmelk}"
+            value: "${DOCKERHUB_USER:-aymenbay}"
           - key: "NOTIFY_EMAIL"
             value: "${NOTIFY_EMAIL:-}"
           - key: "APP_HOST"
@@ -35,7 +35,7 @@ credentials:
               scope: GLOBAL
               id: "dockerhub-creds"
               description: "Docker Hub"
-              username: "${DOCKERHUB_USER:-aymenmelk}"
+              username: "${DOCKERHUB_USER:-aymenbay}"
               password: "${DOCKERHUB_TOKEN:-changeme}"
 
 unclassified:

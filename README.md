@@ -9,7 +9,7 @@ Chaîne DevOps complète autour d'une application **Spring Boot 4 + Angular 22**
 |---|---|
 | Étudiant | Aymen Melki — 3C-ACC2 |
 | Repo Git (`classe_nomEtudiant`) | `3C-ACC2-AymenMelki` |
-| Images Docker (`nomprenom-classe-nomProjet`) | `aymenmelk/aymenmelki-3c-acc2-gestionprojets-backend` et `…-frontend` |
+| Images Docker (`nomprenom-classe-nomProjet`) | `aymenbay/aymenmelki-3c-acc2-gestionprojets-backend` et `…-frontend` |
 
 > Les noms d'images Docker doivent être en minuscules, d'où `aymenmelki-3c-acc2-…`.
 
@@ -114,7 +114,7 @@ docker compose up -d --build
 | Frontend | `npm ci`, `npm run test:ci` (Vitest + lcov), `npm run build` |
 | SonarQube | `npx @sonar/scan` (lit `sonar-project.properties`) |
 | Quality Gate | `waitForQualityGate` (webhook Sonar → Jenkins créé automatiquement) |
-| Docker build | `aymenmelk/aymenmelki-3c-acc2-gestionprojets-{backend,frontend}:<build>` + `latest` |
+| Docker build | `aymenbay/aymenmelki-3c-acc2-gestionprojets-{backend,frontend}:<build>` + `latest` |
 | Docker push | Docker Hub (identifiants `dockerhub-creds` depuis `infra/.env`) |
 | Deploy | `docker compose up -d` (Spring + MySQL + Angular) |
 | Smoke test | `/actuator/health`, `/entreprise/all`, frontend, métriques Prometheus |

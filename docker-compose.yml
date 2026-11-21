@@ -22,7 +22,7 @@ services:
       retries: 30
 
   backend:
-    image: ${DOCKERHUB_USER:-aymenmelk}/aymenmelki-3c-acc2-gestionprojets-backend:${IMAGE_TAG:-latest}
+    image: ${DOCKERHUB_USER:-aymenbay}/aymenmelki-3c-acc2-gestionprojets-backend:${IMAGE_TAG:-latest}
     build:
       context: ./backend
     container_name: gp-backend
@@ -38,7 +38,7 @@ services:
         condition: service_healthy
 
   frontend:
-    image: ${DOCKERHUB_USER:-aymenmelk}/aymenmelki-3c-acc2-gestionprojets-frontend:${IMAGE_TAG:-latest}
+    image: ${DOCKERHUB_USER:-aymenbay}/aymenmelki-3c-acc2-gestionprojets-frontend:${IMAGE_TAG:-latest}
     build:
       context: ./frontend
     container_name: gp-frontend

@@ -25,7 +25,7 @@ pipeline {
         CI           = 'true'
         // Image naming rule of the brief: nomprenom-classe-nomprojet (Docker requires lowercase)
         IMAGE_PREFIX = 'aymenmelki-3c-acc2-gestionprojets'
-        HUB_USER     = "${env.DOCKERHUB_USER ?: 'aymenmelk'}"
+        HUB_USER     = "${env.DOCKERHUB_USER ?: 'aymenbay'}"
         BACKEND_IMG  = "${HUB_USER}/${IMAGE_PREFIX}-backend"
         FRONTEND_IMG = "${HUB_USER}/${IMAGE_PREFIX}-frontend"
         IMAGE_TAG    = "${env.BUILD_NUMBER}"
