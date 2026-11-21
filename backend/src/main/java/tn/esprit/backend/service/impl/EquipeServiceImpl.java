@@ -2,6 +2,7 @@ package tn.esprit.backend.service.impl;
 
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import tn.esprit.backend.entity.Entreprise;
 import tn.esprit.backend.entity.Equipe;
 import tn.esprit.backend.entity.Projet;
@@ -52,6 +53,7 @@ public class EquipeServiceImpl implements IEquipeService {
     }
 
     @Override
+    @Transactional
     public Equipe assignEquipeToEntreprise(Long equipeId, Long entrepriseId) {
         Equipe equipe = findEquipe(equipeId);
         Entreprise entreprise = entrepriseRepository.findById(entrepriseId)
@@ -61,6 +63,7 @@ public class EquipeServiceImpl implements IEquipeService {
     }
 
     @Override
+    @Transactional
     public Equipe assignEquipeToProjet(Long equipeId, Long projetId) {
         Equipe equipe = findEquipe(equipeId);
         Projet projet = projetRepository.findById(projetId)
