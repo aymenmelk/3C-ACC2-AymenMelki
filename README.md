@@ -42,6 +42,7 @@ Jenkins livre la même application avec `docker compose` (paramètre `DEPLOY_TAR
 | `infra/docker-compose.yml` | **Outils DevOps** : Jenkins, SonarQube (+ PostgreSQL), Prometheus, Grafana |
 | `infra/jenkins/` | Image Jenkins (JDK 21, Node 24, Docker CLI) + plugins + **Configuration as Code** (job créé automatiquement) |
 | `infra/sonar/sonar-init.sh` | Configure SonarQube automatiquement (mot de passe admin, token Jenkins, webhook Quality Gate) |
+| `infra/ubuntu-vm/setup-ubuntu.sh` | Installe toute la chaîne dans une **VM Ubuntu sur VMware** (architecture du sujet) |
 | `infra/prometheus/`, `infra/grafana/` | Scraping + datasource et dashboard Grafana provisionnés |
 | `Jenkinsfile` | Pipeline CI/CD |
 | `.github/workflows/ci.yml` | Même chaîne sur GitHub Actions + test end-to-end de Jenkins/Sonar/Grafana |
@@ -111,6 +112,25 @@ Ensuite le job vérifie GitHub toutes les 5 minutes (`pollSCM`) : chaque `git pu
 
 Grafana (POD Monitoring : http://localhost:30300, ou http://localhost:3000 côté outils) → Dashboards → **DevOps → « Projet DevOps — Gestion des Projets »** :
 requêtes HTTP/s, latence p95, erreurs 5xx, mémoire JVM, threads, connexions MySQL (HikariCP), état et durée des builds Jenkins.
+
+### 🐧 Installation dans une VM Ubuntu sur VMware (architecture du sujet)
+
+C'est l'architecture du schéma : **GitHub + Maven + Jenkins dans une VM Ubuntu (VMware)**, qui livre sur **Kubernetes**.
+
+1. VMware Workstation → *Create a New Virtual Machine* → ISO **Ubuntu Server 24.04 LTS** (ou 26.04 LTS)
+   - RAM **8 Go** (minimum 6 Go), **4 vCPU**, disque **60 Go**, réseau **NAT**
+   - Pendant l'installation : cocher **Install OpenSSH server**
+2. Dans la VM (connecté avec votre utilisateur, pas root) :
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/aymenmelk/3C-ACC2-AymenMelki/main/infra/ubuntu-vm/setup-ubuntu.sh -o setup-ubuntu.sh
+   bash setup-ubuntu.sh
+   ```
+   Le script installe Git, Java 17, **Maven** (et lance `mvn clean install`), Docker, **Kubernetes (k3s)**,
+   puis démarre Jenkins, SonarQube, Prometheus et Grafana. Il affiche à la fin les URLs avec l'IP de la VM.
+3. Mettre le token Docker Hub dans `~/3C-ACC2-AymenMelki/infra/.env`, puis `sg docker -c "docker compose up -d jenkins"`.
+4. Depuis Windows : `http://<IP-de-la-VM>:8081` → **Build Now**.
+
+> Avec la VM, arrêtez la pile Docker Desktop sous Windows (`docker compose down` dans `infra`) pour libérer la RAM.
 
 ### Lancer seulement l'application (sans Jenkins)
 
