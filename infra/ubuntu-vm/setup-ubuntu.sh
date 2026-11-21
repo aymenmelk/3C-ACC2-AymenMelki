@@ -68,7 +68,11 @@ fi
 # k3s names its kubeconfig context "default" (Docker Desktop uses "docker-desktop")
 grep -q '^KUBE_CONTEXT=' .env || echo 'KUBE_CONTEXT=default' >> .env
 # "sg docker" = docker group without re-login, and keeps $HOME so ~/.kube is mounted into Jenkins
-sg docker -c "docker compose up -d"   # builds the Jenkins image only if it is not already there
+# Rebuild the Jenkins image if it is missing or older than the current Dockerfile (no kubectl inside)
+if ! sg docker -c "docker run --rm --entrypoint sh aymenmelki-3c-acc2-jenkins:latest -c 'command -v kubectl'" >/dev/null 2>&1; then
+  sg docker -c "docker compose build jenkins"
+fi
+sg docker -c "docker compose up -d"
 
 VM_IP="$(hostname -I | awk '{print $1}')"
 cat <<MSG
