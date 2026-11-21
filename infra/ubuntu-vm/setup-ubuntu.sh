@@ -22,9 +22,12 @@ fi
 
 step() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 
-step "1/7 System packages: Git, Java 17, Maven, curl"
+step "1/7 System packages: Git, Java (17, or 21 on newer Ubuntu), Maven, curl"
 sudo apt-get update -y
-sudo apt-get install -y git curl ca-certificates openjdk-17-jdk maven
+sudo apt-get install -y git curl ca-certificates
+if apt-cache show openjdk-17-jdk >/dev/null 2>&1; then JDK=openjdk-17-jdk; else JDK=openjdk-21-jdk; fi
+sudo apt-get install -y "$JDK" maven
+java -version && mvn -version
 
 step "2/7 Docker Engine + compose plugin"
 if ! command -v docker >/dev/null 2>&1; then
