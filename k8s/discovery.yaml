@@ -1,0 +1,44 @@
+# POD discovery-server — microservice registre Eureka (service registration and discovery)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: discovery
+  labels: { app: discovery }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: discovery }
+  template:
+    metadata:
+      labels: { app: discovery }
+    spec:
+      containers:
+        - name: discovery
+          image: aymenbay/aymenmelki-3c-acc2-gestionprojets-discovery:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8761
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: 8761 }
+            initialDelaySeconds: 15
+            periodSeconds: 5
+            failureThreshold: 24
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: 8761 }
+            initialDelaySeconds: 60
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { memory: 512Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: discovery
+spec:
+  type: NodePort
+  selector: { app: discovery }
+  ports:
+    - port: 8761
+      targetPort: 8761
+      nodePort: 30761

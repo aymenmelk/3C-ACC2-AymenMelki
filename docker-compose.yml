@@ -1,4 +1,4 @@
-# Livraison continue : Spring Boot + MySQL + Angular
+# Livraison continue : Spring Boot + MySQL + Angular + registre Eureka (microservices)
 # Usage:  docker compose up -d --build        (images are built locally)
 #    or:  IMAGE_TAG=12 docker compose up -d   (with images pulled from Docker Hub after the Jenkins push)
 name: gestionprojets
@@ -21,6 +21,16 @@ services:
       timeout: 5s
       retries: 30
 
+  # Microservice: Eureka service registry
+  discovery:
+    image: ${DOCKERHUB_USER:-aymenbay}/aymenmelki-3c-acc2-gestionprojets-discovery:${IMAGE_TAG:-latest}
+    build:
+      context: ./discovery-server
+    container_name: gp-discovery
+    restart: unless-stopped
+    ports:
+      - "8761:8761"
+
   backend:
     image: ${DOCKERHUB_USER:-aymenbay}/aymenmelki-3c-acc2-gestionprojets-backend:${IMAGE_TAG:-latest}
     build:
@@ -31,11 +41,15 @@ services:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE:-gestion_projets}?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
       SPRING_DATASOURCE_USERNAME: root
       SPRING_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      EUREKA_ENABLED: "true"
+      EUREKA_URL: http://discovery:8761/eureka/
     ports:
       - "8080:8080"
     depends_on:
       mysql:
         condition: service_healthy
+      discovery:
+        condition: service_started
 
   frontend:
     image: ${DOCKERHUB_USER:-aymenbay}/aymenmelki-3c-acc2-gestionprojets-frontend:${IMAGE_TAG:-latest}

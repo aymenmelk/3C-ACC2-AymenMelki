@@ -1,5 +1,5 @@
 // Projet DevOps — Aymen Melki — 3C-ACC2
-// Maven -> Tests -> SonarQube -> Docker -> Kubernetes PODs (Spring, MySQL, Angular, Monitoring Prometheus+Grafana)
+// Maven -> Tests -> SonarQube -> Docker -> Kubernetes PODs (Spring, MySQL, Angular, Eureka, Monitoring Prometheus+Grafana)
 pipeline {
     agent any
 
@@ -29,6 +29,7 @@ pipeline {
         HUB_USER     = "${env.DOCKERHUB_USER ?: 'aymenbay'}"
         BACKEND_IMG  = "${HUB_USER}/${IMAGE_PREFIX}-backend"
         FRONTEND_IMG = "${HUB_USER}/${IMAGE_PREFIX}-frontend"
+        DISCOVERY_IMG = "${HUB_USER}/${IMAGE_PREFIX}-discovery"
         IMAGE_TAG    = "${env.BUILD_NUMBER}"
         APP_URL      = "http://${env.APP_HOST ?: 'localhost'}"
         K8S_NS       = 'gestionprojets'
@@ -82,6 +83,20 @@ pipeline {
             }
         }
 
+        stage('Microservice: discovery-server (Maven)') {
+            steps {
+                dir('discovery-server') {
+                    sh 'chmod +x mvnw && ./mvnw -B clean install'
+                }
+                archiveArtifacts artifacts: 'discovery-server/target/*.jar', fingerprint: true
+            }
+            post {
+                always {
+                    junit allowEmptyResults: false, testResults: 'discovery-server/target/surefire-reports/*.xml'
+                }
+            }
+        }
+
         stage('Frontend: install, test, build') {
             steps {
                 dir('frontend') {
@@ -115,6 +130,7 @@ pipeline {
                     # Package the artifacts built and tested above (no re-download, takes seconds)
                     docker build -f backend/Dockerfile.jenkins  -t "$BACKEND_IMG:$IMAGE_TAG"  -t "$BACKEND_IMG:latest"  ./backend
                     docker build -f frontend/Dockerfile.jenkins -t "$FRONTEND_IMG:$IMAGE_TAG" -t "$FRONTEND_IMG:latest" ./frontend
+                    docker build -f discovery-server/Dockerfile.jenkins -t "$DISCOVERY_IMG:$IMAGE_TAG" -t "$DISCOVERY_IMG:latest" ./discovery-server
                     docker images | grep "$IMAGE_PREFIX"
                 '''
             }
@@ -129,7 +145,7 @@ pipeline {
                                                       usernameVariable: 'DH_USER', passwordVariable: 'DH_PASS')]) {
                         sh '''
                             echo "$DH_PASS" | docker login -u "$DH_USER" --password-stdin
-                            for img in "$BACKEND_IMG" "$FRONTEND_IMG"; do
+                            for img in "$BACKEND_IMG" "$FRONTEND_IMG" "$DISCOVERY_IMG"; do
                                 docker push "$img:$IMAGE_TAG"
                                 docker push "$img:latest"
                             done
@@ -177,14 +193,16 @@ pipeline {
                     $K apply -k k8s
 
                     $K -n "$K8S_NS" rollout status deployment/mysql      --timeout=300s
+                    $K -n "$K8S_NS" rollout status deployment/discovery  --timeout=300s
                     $K -n "$K8S_NS" rollout status deployment/backend    --timeout=600s
                     $K -n "$K8S_NS" rollout status deployment/frontend   --timeout=300s
                     $K -n "$K8S_NS" rollout status deployment/monitoring --timeout=300s
                     $K -n "$K8S_NS" get pods,svc -o wide
                 '''
                 script {
-                    env.BACKEND_URL  = "${env.APP_URL}:30080"
-                    env.FRONTEND_URL = "${env.APP_URL}:30420"
+                    env.BACKEND_URL   = "${env.APP_URL}:30080"
+                    env.FRONTEND_URL  = "${env.APP_URL}:30420"
+                    env.DISCOVERY_URL = "${env.APP_URL}:30761"
                 }
             }
         }
@@ -198,8 +216,9 @@ pipeline {
                     docker compose -f docker-compose.yml ps
                 '''
                 script {
-                    env.BACKEND_URL  = "${env.APP_URL}:8080"
-                    env.FRONTEND_URL = "${env.APP_URL}:4200"
+                    env.BACKEND_URL   = "${env.APP_URL}:8080"
+                    env.FRONTEND_URL  = "${env.APP_URL}:4200"
+                    env.DISCOVERY_URL = "${env.APP_URL}:8761"
                 }
             }
         }
@@ -220,6 +239,14 @@ pipeline {
                     curl -fs -o /dev/null "$FRONTEND_URL" && echo "Frontend UP"
                     curl -fs -o /dev/null "$FRONTEND_URL/api/entreprise/all" && echo "Frontend -> backend proxy OK"
                     curl -fs "$BACKEND_URL/actuator/prometheus" | grep -q http_server_requests && echo "Prometheus metrics OK"
+                    # Microservices: the backend must be registered in Eureka (registration can take ~30 s)
+                    for i in $(seq 1 24); do
+                        if curl -fs -H 'Accept: application/json' "$DISCOVERY_URL/eureka/apps/BACKEND" | grep -q '"status":"UP"'; then
+                            echo "Backend registered in Eureka (discovery-server)"; break
+                        fi
+                        echo "waiting for Eureka registration ($i/24)..."; sleep 5
+                    done
+                    curl -fs -H 'Accept: application/json' "$DISCOVERY_URL/eureka/apps/BACKEND" | grep -q '"status":"UP"'
                     if [ "$DEPLOY_MODE" = "kubernetes" ]; then
                         curl -fs "$APP_URL:30300/api/health" && echo " Grafana POD OK"
                         curl -fs "$APP_URL:30090/-/ready" && echo " Prometheus POD OK"

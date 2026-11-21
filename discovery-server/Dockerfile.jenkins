@@ -1,0 +1,6 @@
+# Used by Jenkins: packages the jar already built and tested by the pipeline
+FROM eclipse-temurin:17-jre
+WORKDIR /app
+COPY target/discovery-server-1.0.0.jar app.jar
+EXPOSE 8761
+ENTRYPOINT ["java", "-jar", "app.jar"]

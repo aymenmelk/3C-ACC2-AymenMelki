@@ -6,6 +6,7 @@ namespace: gestionprojets
 resources:
   - namespace.yaml
   - mysql.yaml
+  - discovery.yaml
   - backend.yaml
   - frontend.yaml
   - monitoring/monitoring.yaml
@@ -25,4 +26,6 @@ images:
   - name: aymenbay/aymenmelki-3c-acc2-gestionprojets-backend
     newTag: latest
   - name: aymenbay/aymenmelki-3c-acc2-gestionprojets-frontend
+    newTag: latest
+  - name: aymenbay/aymenmelki-3c-acc2-gestionprojets-discovery
     newTag: latest
