@@ -73,10 +73,22 @@ jobs:
     needs: [backend, frontend]
     steps:
       - uses: actions/checkout@v4
-      - name: Build images
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Build artifacts and images (same as Jenkins)
         run: |
-          docker build -t aymenbay/aymenmelki-3c-acc2-gestionprojets-backend:ci  ./backend
-          docker build -t aymenbay/aymenmelki-3c-acc2-gestionprojets-frontend:ci ./frontend
+          (cd backend && chmod +x mvnw && ./mvnw -B -q package -DskipTests)
+          (cd frontend && npm ci --no-audit --no-fund && npm run build)
+          docker build -f backend/Dockerfile.jenkins  -t aymenbay/aymenmelki-3c-acc2-gestionprojets-backend:ci  ./backend
+          docker build -f frontend/Dockerfile.jenkins -t aymenbay/aymenmelki-3c-acc2-gestionprojets-frontend:ci ./frontend
       - uses: helm/kind-action@v1
         with:
           cluster_name: devops
