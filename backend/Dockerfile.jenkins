@@ -1,0 +1,7 @@
+# Used by Jenkins: packages the jar already built and tested by the "Maven" stages
+# (build once, package the same artifact). Standalone builds use ./Dockerfile instead.
+FROM eclipse-temurin:17-jre
+WORKDIR /app
+COPY target/backend-1.0.0.jar app.jar
+EXPOSE 8080
+ENTRYPOINT ["java", "-jar", "app.jar"]

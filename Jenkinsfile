@@ -110,8 +110,9 @@ pipeline {
         stage('Docker: build images') {
             steps {
                 sh '''
-                    docker build -t "$BACKEND_IMG:$IMAGE_TAG"  -t "$BACKEND_IMG:latest"  ./backend
-                    docker build -t "$FRONTEND_IMG:$IMAGE_TAG" -t "$FRONTEND_IMG:latest" ./frontend
+                    # Package the artifacts built and tested above (no re-download, takes seconds)
+                    docker build -f backend/Dockerfile.jenkins  -t "$BACKEND_IMG:$IMAGE_TAG"  -t "$BACKEND_IMG:latest"  ./backend
+                    docker build -f frontend/Dockerfile.jenkins -t "$FRONTEND_IMG:$IMAGE_TAG" -t "$FRONTEND_IMG:latest" ./frontend
                     docker images | grep "$IMAGE_PREFIX"
                 '''
             }
