@@ -1,0 +1,174 @@
+# IaC (Ansible) 2/2 — configures the tools running in the containers / PODs, through their APIs:
+#   SonarQube: admin password, project, Quality Gate, Jenkins webhook check
+#   Grafana:   Prometheus datasource health, home dashboard
+#   Jenkins:   up, job created by JCasC, optional build trigger
+#   Prometheus: scrape targets
+#   ansible-playbook configure.yml          (add -e jenkins_trigger_build=true to start a build)
+- name: Configure the DevOps tools
+  hosts: devops
+  gather_facts: false
+  tags: [configure]
+  tasks:
+    # ------------------------------------------------------------------ SonarQube
+    - name: SonarQube is UP
+      ansible.builtin.uri:
+        url: "{{ sonar_url }}/api/system/status"
+        return_content: true
+      register: sonar_status
+      until: sonar_status.json is defined and sonar_status.json.status == 'UP'
+      retries: 90
+      delay: 10
+
+    - name: Is the default admin/admin password still active?
+      ansible.builtin.uri:
+        url: "{{ sonar_url }}/api/authentication/validate"
+        user: admin
+        password: admin
+        force_basic_auth: true
+      register: sonar_default
+
+    - name: Change the default SonarQube admin password
+      when: sonar_default.json.valid
+      ansible.builtin.uri:
+        url: "{{ sonar_url }}/api/users/change_password"
+        method: POST
+        user: admin
+        password: admin
+        force_basic_auth: true
+        body_format: form-urlencoded
+        body:
+          login: admin
+          previousPassword: admin
+          password: "{{ sonar_admin_password }}"
+        status_code: [200, 204]
+
+    - name: Look for the project
+      ansible.builtin.uri:
+        url: "{{ sonar_url }}/api/projects/search?projects={{ project_key }}"
+        user: admin
+        password: "{{ sonar_admin_password }}"
+        force_basic_auth: true
+      register: sonar_project
+
+    - name: Create the project
+      when: sonar_project.json.components | length == 0
+      ansible.builtin.uri:
+        url: "{{ sonar_url }}/api/projects/create"
+        method: POST
+        user: admin
+        password: "{{ sonar_admin_password }}"
+        force_basic_auth: true
+        body_format: form-urlencoded
+        body:
+          project: "{{ project_key }}"
+          name: "{{ project_name }}"
+
+    - name: Attach the Quality Gate "{{ sonar_quality_gate }}"
+      ansible.builtin.uri:
+        url: "{{ sonar_url }}/api/qualitygates/select"
+        method: POST
+        user: admin
+        password: "{{ sonar_admin_password }}"
+        force_basic_auth: true
+        body_format: form-urlencoded
+        body:
+          gateName: "{{ sonar_quality_gate }}"
+          projectKey: "{{ project_key }}"
+        status_code: [200, 204]
+
+    - name: Webhooks configured in SonarQube
+      ansible.builtin.uri:
+        url: "{{ sonar_url }}/api/webhooks/list"
+        user: admin
+        password: "{{ sonar_admin_password }}"
+        force_basic_auth: true
+      register: sonar_webhooks
+
+    - name: The Quality Gate webhook to Jenkins exists (created by sonar-init)
+      ansible.builtin.assert:
+        that: sonar_webhooks.json.webhooks | selectattr('name', 'equalto', 'jenkins') | list | length == 1
+        success_msg: "webhook -> {{ (sonar_webhooks.json.webhooks | selectattr('name', 'equalto', 'jenkins') | first).url }}"
+
+    # ------------------------------------------------------------------ Grafana
+    - name: Grafana is UP
+      ansible.builtin.uri:
+        url: "{{ grafana_url }}/api/health"
+      register: grafana_health
+      until: grafana_health.status == 200
+      retries: 30
+      delay: 5
+
+    - name: Prometheus datasource health
+      ansible.builtin.uri:
+        url: "{{ grafana_url }}/api/datasources/uid/prometheus/health"
+        user: "{{ grafana_admin_user }}"
+        password: "{{ grafana_admin_password }}"
+        force_basic_auth: true
+      register: ds_health
+      until: ds_health.json.status == 'OK'
+      retries: 12
+      delay: 5
+
+    - name: Project dashboard as Grafana home page
+      ansible.builtin.uri:
+        url: "{{ grafana_url }}/api/org/preferences"
+        method: PATCH
+        user: "{{ grafana_admin_user }}"
+        password: "{{ grafana_admin_password }}"
+        force_basic_auth: true
+        body_format: json
+        body:
+          homeDashboardUID: "{{ grafana_home_dashboard_uid }}"
+          timezone: browser
+
+    # ------------------------------------------------------------------ Prometheus
+    - name: Prometheus scrape targets
+      ansible.builtin.uri:
+        url: "{{ prometheus_url }}/api/v1/targets"
+      register: prom_targets
+      until: prom_targets.status == 200
+      retries: 12
+      delay: 5
+
+    - name: Targets health
+      ansible.builtin.debug:
+        msg: "{{ prom_targets.json.data.activeTargets | map(attribute='labels') | map(attribute='job') | zip(prom_targets.json.data.activeTargets | map(attribute='health')) | map('join', ' = ') | list }}"
+
+    # ------------------------------------------------------------------ Jenkins
+    - name: Jenkins is UP
+      ansible.builtin.uri:
+        url: "{{ jenkins_url }}/api/json"
+        user: "{{ jenkins_admin_id }}"
+        password: "{{ jenkins_admin_password }}"
+        force_basic_auth: true
+      register: jenkins_api
+      until: jenkins_api.status == 200
+      retries: 60
+      delay: 5
+
+    - name: The pipeline job exists (Configuration as Code + Job DSL)
+      ansible.builtin.assert:
+        that: jenkins_api.json.jobs | selectattr('name', 'equalto', jenkins_job) | list | length == 1
+
+    - name: Start a build
+      when: jenkins_trigger_build | bool
+      block:
+        - name: CSRF crumb
+          ansible.builtin.uri:
+            url: "{{ jenkins_url }}/crumbIssuer/api/json"
+            user: "{{ jenkins_admin_id }}"
+            password: "{{ jenkins_admin_password }}"
+            force_basic_auth: true
+          register: crumb
+
+        - name: Build {{ jenkins_job }}
+          ansible.builtin.uri:
+            url: "{{ jenkins_url }}/job/{{ jenkins_job }}/build"
+            method: POST
+            user: "{{ jenkins_admin_id }}"
+            password: "{{ jenkins_admin_password }}"
+            force_basic_auth: true
+            headers:
+              "{{ crumb.json.crumbRequestField }}": "{{ crumb.json.crumb }}"
+              Cookie: "{{ crumb.cookies_string }}"
+            status_code: [200, 201]

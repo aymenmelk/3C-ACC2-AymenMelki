@@ -1,0 +1,118 @@
+# IaC (Ansible) 1/2 — prepares the Ubuntu VM of the architecture:
+# Git, Java, Maven, Docker, Kubernetes (k3s), Terraform, project sources, SonarQube POD.
+#   ansible-playbook provision.yml -K
+- name: Provision the Ubuntu DevOps VM
+  hosts: devops
+  become: true
+  vars:
+    target_user: "{{ ansible_env.SUDO_USER | default(ansible_user_id) }}"
+    target_home: "/home/{{ ansible_env.SUDO_USER | default(ansible_user_id) }}"
+  tags: [provision]
+  tasks:
+    - name: Base packages (Git, curl, Maven, gnupg)
+      ansible.builtin.apt:
+        name: [git, curl, ca-certificates, gnupg, maven, unzip]
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Java 17 if available, else 21 (Ubuntu 26.04)
+      ansible.builtin.shell: |
+        if apt-cache show openjdk-17-jdk >/dev/null 2>&1; then echo openjdk-17-jdk; else echo openjdk-21-jdk; fi
+      register: jdk
+      changed_when: false
+
+    - name: Install the JDK
+      ansible.builtin.apt:
+        name: "{{ jdk.stdout }}"
+        state: present
+
+    - name: Docker Engine (official script)
+      ansible.builtin.shell: curl -fsSL https://get.docker.com | sh
+      args:
+        creates: /usr/bin/docker
+
+    - name: "{{ target_user }} can use Docker"
+      ansible.builtin.user:
+        name: "{{ target_user }}"
+        groups: docker
+        append: true
+
+    - name: SonarQube kernel setting
+      ansible.builtin.copy:
+        dest: /etc/sysctl.d/99-sonarqube.conf
+        content: "vm.max_map_count=524288\n"
+        mode: "0644"
+      notify: reload sysctl
+
+    - name: Kubernetes (k3s, Docker runtime, without Traefik)
+      ansible.builtin.shell: >
+        curl -sfL https://get.k3s.io |
+        INSTALL_K3S_EXEC="--docker --disable traefik --tls-san kubernetes.docker.internal --write-kubeconfig-mode 644" sh -
+      args:
+        creates: /usr/local/bin/k3s
+
+    - name: Wait for the Kubernetes node
+      ansible.builtin.command: k3s kubectl get nodes
+      register: nodes
+      until: "' Ready' in nodes.stdout"
+      retries: 30
+      delay: 5
+      changed_when: false
+
+    - name: ~/.kube directory
+      ansible.builtin.file:
+        path: "{{ target_home }}/.kube"
+        state: directory
+        owner: "{{ target_user }}"
+        mode: "0700"
+
+    - name: kubeconfig for {{ target_user }} (also mounted read-only into Jenkins)
+      ansible.builtin.copy:
+        src: /etc/rancher/k3s/k3s.yaml
+        dest: "{{ target_home }}/.kube/config"
+        remote_src: true
+        owner: "{{ target_user }}"
+        mode: "0600"
+
+    - name: HashiCorp apt key (Terraform)
+      ansible.builtin.shell: |
+        curl -fsSL https://apt.releases.hashicorp.com/gpg | gpg --dearmor -o /usr/share/keyrings/hashicorp.gpg
+      args:
+        creates: /usr/share/keyrings/hashicorp.gpg
+
+    - name: HashiCorp apt repository
+      ansible.builtin.shell: |
+        CODENAME=$(. /etc/os-release && echo "$VERSION_CODENAME")
+        # HashiCorp publishes the newest Ubuntu codenames late: fall back to noble
+        curl -fsSI "https://apt.releases.hashicorp.com/dists/$CODENAME/Release" >/dev/null 2>&1 || CODENAME=noble
+        echo "deb [signed-by=/usr/share/keyrings/hashicorp.gpg] https://apt.releases.hashicorp.com $CODENAME main" > /etc/apt/sources.list.d/hashicorp.list
+      args:
+        creates: /etc/apt/sources.list.d/hashicorp.list
+
+    - name: Terraform
+      ansible.builtin.apt:
+        name: terraform
+        state: present
+        update_cache: true
+
+    - name: Project sources
+      ansible.builtin.git:
+        repo: "{{ repo_url }}"
+        dest: "{{ target_home }}/3C-ACC2-AymenMelki"
+        version: main
+        update: true
+      become_user: "{{ target_user }}"
+
+    - name: SonarQube POD (Kubernetes)
+      ansible.builtin.command: k3s kubectl apply -k {{ target_home }}/3C-ACC2-AymenMelki/k8s/sonarqube
+      register: sonar_apply
+      changed_when: "'created' in sonar_apply.stdout or 'configured' in sonar_apply.stdout"
+
+    - name: Wait for the SonarQube POD (first start takes a few minutes)
+      ansible.builtin.command: k3s kubectl -n sonarqube rollout status deployment/sonarqube --timeout=900s
+      changed_when: false
+
+  handlers:
+    - name: reload sysctl
+      ansible.builtin.command: sysctl --system

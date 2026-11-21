@@ -141,6 +141,75 @@ jobs:
           kubectl -n gestionprojets describe pods | tail -100
           kubectl -n gestionprojets logs deployment/backend --tail=100 || true
 
+  iac-terraform-ansible:
+    name: IaC - Terraform (Docker containers) + Ansible (tool configuration)
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+      - name: Terraform fmt / init / validate
+        working-directory: iac/terraform
+        run: |
+          terraform fmt -check -recursive -diff
+          terraform init -input=false
+          terraform validate
+      - name: Ansible syntax check
+        working-directory: iac/ansible
+        run: |
+          pipx install ansible-core || pip install --user ansible-core
+          ansible-playbook --syntax-check provision.yml configure.yml site.yml
+      - name: Terraform apply (Jenkins, SonarQube, Prometheus, Grafana containers)
+        working-directory: iac/terraform
+        run: |
+          mkdir -p "$HOME/.kube"
+          terraform apply -input=false -auto-approve -var sonar_in_docker=true -var "kube_dir=$HOME/.kube"
+          terraform output
+          docker ps --format '{{.Names}}\t{{.Status}}'
+      - name: Ansible configure (SonarQube project + Quality Gate, Grafana home, Jenkins/Prometheus checks)
+        working-directory: iac/ansible
+        run: |
+          ansible-playbook configure.yml -e sonar_url=http://localhost:9000
+          # idempotence: a second run must succeed too
+          ansible-playbook configure.yml -e sonar_url=http://localhost:9000
+      - name: Verify the configuration done by Terraform + Ansible
+        run: |
+          curl -fsS -u 'admin:Admin_DevOps_2026!' "localhost:9000/api/qualitygates/get_by_project?project=aymenmelki-3c-acc2-gestionprojets" | tee /dev/stderr | grep -q '"name":"Sonar way"' && echo
+          curl -fsS -u admin:admin localhost:3000/api/org/preferences | tee /dev/stderr | grep -q gestionprojets-devops && echo
+          curl -fsS -u admin:admin localhost:8081/job/gestionprojets-pipeline/api/json | grep -q gestionprojets-pipeline && echo "Jenkins job OK"
+      - if: failure()
+        run: docker logs --tail 80 sonar-init; docker logs --tail 80 jenkins
+      - if: always()
+        working-directory: iac/terraform
+        run: terraform destroy -input=false -auto-approve -var sonar_in_docker=true -var "kube_dir=$HOME/.kube" || true
+
+  ansible-provision:
+    name: Ansible provision of a fresh Ubuntu (Docker, k3s, Terraform, SonarQube POD)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: ansible-playbook provision.yml (what runs in the VMware VM)
+        working-directory: iac/ansible
+        run: |
+          pipx install ansible-core || pip install --user ansible-core
+          ansible-playbook provision.yml -e repo_url=https://github.com/${{ github.repository }}.git
+      - name: Check the result
+        run: |
+          java -version 2>&1 | head -1; mvn -v | head -1; docker --version; terraform version | head -1
+          kubectl get nodes || sudo k3s kubectl get nodes
+          sudo k3s kubectl -n sonarqube get pods,svc
+          curl -fsS localhost:30900/api/system/status | tee /dev/stderr | grep -q '"UP"' && echo " SonarQube POD UP"
+          ls ~/3C-ACC2-AymenMelki/Jenkinsfile
+      - if: failure()
+        run: sudo k3s kubectl -n sonarqube describe pods | tail -60 || true
+
   devops-toolchain:
     name: Jenkins + SonarQube + Grafana end-to-end (runs the real Jenkinsfile)
     runs-on: ubuntu-latest

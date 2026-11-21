@@ -1,0 +1,24 @@
+# --- project
+repo_url: https://github.com/aymenmelk/3C-ACC2-AymenMelki.git
+repo_dir: "{{ ansible_env.HOME }}/3C-ACC2-AymenMelki"
+project_key: aymenmelki-3c-acc2-gestionprojets
+project_name: aymenmelki-3c-acc2-gestionprojets
+
+# --- tool URLs, as seen from the VM
+sonar_url: http://localhost:30900          # SonarQube POD (NodePort); http://localhost:9000 when SonarQube runs in Docker
+jenkins_url: http://localhost:8081
+grafana_url: http://localhost:3000
+prometheus_url: http://localhost:9090
+
+# --- credentials (same defaults as infra/.env.example; override with -e or ansible-vault)
+sonar_admin_password: "Admin_DevOps_2026!"
+jenkins_admin_id: admin
+jenkins_admin_password: admin
+grafana_admin_user: admin
+grafana_admin_password: admin
+
+# --- behaviour
+sonar_quality_gate: Sonar way
+grafana_home_dashboard_uid: gestionprojets-devops
+jenkins_job: gestionprojets-pipeline
+jenkins_trigger_build: false

@@ -1,0 +1,4 @@
+# Full run: provision the VM, then configure the tools (the containers are created in between by Terraform
+# or docker compose — see README "IaC").
+- import_playbook: provision.yml
+- import_playbook: configure.yml

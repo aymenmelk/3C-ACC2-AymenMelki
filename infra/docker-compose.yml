@@ -94,6 +94,21 @@ services:
       - "host.docker.internal:host-gateway"
       - "kubernetes.docker.internal:host-gateway"
 
+  # Public HTTPS URL for Jenkins (fixed free ngrok domain): GitHub webhook + remote access to Jenkins.
+  # Enable with COMPOSE_PROFILES=ngrok (+ NGROK_AUTHTOKEN and NGROK_DOMAIN) in .env
+  ngrok:
+    image: ngrok/ngrok:latest
+    profiles: ["ngrok"]
+    container_name: ngrok
+    restart: unless-stopped
+    depends_on:
+      - jenkins
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:-}
+    command: ["http", "jenkins:8080", "--url=${NGROK_DOMAIN:-}", "--log=stdout"]
+    ports:
+      - "4040:4040"
+
   prometheus:
     image: prom/prometheus:v3.5.0
     container_name: prometheus

@@ -1,0 +1,8 @@
+# cp terraform.tfvars.example terraform.tfvars   (git-ignored)
+dockerhub_user  = "aymenbay"
+dockerhub_token = "dckr_pat_..."
+kube_context    = "default" # "docker-desktop" on Docker Desktop
+# sonar_in_docker = true    # SonarQube as containers instead of the Kubernetes POD
+# jenkins_url     = "https://xxxx.ngrok-free.app/"
+# notify_email    = "you@gmail.com"
+# smtp = { host = "smtp.gmail.com", port = "465", user = "you@gmail.com", password = "app-password", from = "you@gmail.com" }
