@@ -36,9 +36,9 @@ fi
 sudo usermod -aG docker "$USER"
 sudo systemctl enable --now docker
 
-step "3/7 Kubernetes (k3s, using Docker as runtime so Jenkins-built images are visible to the PODs)"
+step "3/7 Kubernetes (k3s, Docker runtime so Jenkins-built images are visible to the PODs; no Traefik: it would take a random NodePort such as 30420)"
 if ! command -v k3s >/dev/null 2>&1; then
-  curl -sfL https://get.k3s.io | sudo INSTALL_K3S_EXEC="--docker --tls-san kubernetes.docker.internal --write-kubeconfig-mode 644" sh -
+  curl -sfL https://get.k3s.io | sudo INSTALL_K3S_EXEC="--docker --disable traefik --tls-san kubernetes.docker.internal --write-kubeconfig-mode 644" sh -
 fi
 mkdir -p "$HOME/.kube"
 cp /etc/rancher/k3s/k3s.yaml "$HOME/.kube/config"
