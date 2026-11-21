@@ -3,7 +3,7 @@
 [![CI](https://github.com/aymenmelk/3C-ACC2-AymenMelki/actions/workflows/ci.yml/badge.svg)](https://github.com/aymenmelk/3C-ACC2-AymenMelki/actions/workflows/ci.yml)
 
 Chaîne DevOps complète autour d'une application **Spring Boot 4 + Angular 22** de gestion de projets
-(Entreprises, Équipes, Projets, Projets détaillés) : **Maven → Git → SonarQube → Jenkins → Docker Hub → Kubernetes (PODs Spring, MySQL, Angular, Monitoring) → Grafana**.
+(Entreprises, Équipes, Projets, Projets détaillés) : **Maven → Git → SonarQube → Jenkins → Docker Hub → Kubernetes (PODs SonarQube, Spring, MySQL, Angular, Eureka, Monitoring) → Grafana**, infrastructure décrite par **Terraform** et **Ansible**.
 
 | | |
 |---|---|
@@ -18,28 +18,37 @@ Chaîne DevOps complète autour d'une application **Spring Boot 4 + Angular 22**
 ## 🏗️ Architecture
 
 ```
-GitHub ──(poll / webhook)──▶ Jenkins ──▶ mvnw clean/compile/test/package/install
-                                │      ──▶ npm ci / test:ci / build
-                                │      ──▶ SonarQube (+ Quality Gate, couverture JaCoCo + lcov)
-                                │      ──▶ docker build ──▶ Docker Hub
-                                └──────▶ kubectl apply -k k8s ──▶ Kubernetes (namespace gestionprojets)
-                                                                   ├─ POD MySQL 8.4 (+ volume persistant)
-                                                                   ├─ POD Spring Boot   :30080
-                                                                   ├─ POD Angular/nginx :30420  (/api → Spring)
-                                                                   └─ POD Monitoring : Prometheus :30090 + Grafana :30300
+VMware ─ VM Ubuntu (provisionnée par Ansible)
+ │
+ │ GitHub ──(webhook via ngrok / poll)──▶ Jenkins (conteneur, créé par docker compose ou Terraform)
+ │                                          ├─▶ Maven clean/compile/test/package/install (backend + discovery-server)
+ │                                          ├─▶ npm ci / test:ci / build (Angular)
+ │                                          ├─▶ POD SonarQube (Code Analysis + Quality Gate)
+ │                                          ├─▶ docker build ──▶ Docker Hub
+ │                                          └─▶ kubectl apply -k k8s ──▶ Kubernetes (k3s)
+ │                                                 ├─ POD MySQL 8.4 (+ volume persistant)
+ │                                                 ├─ POD discovery-server (Eureka) :30761
+ │                                                 ├─ POD Spring Boot :30080   (s'enregistre dans Eureka)
+ │                                                 ├─ POD Angular/nginx :30420 (/api → Spring)
+ │                                                 └─ POD Monitoring : Prometheus :30090 + Grafana :30300
+ └─ namespace sonarqube : POD SonarQube :30900 + POD PostgreSQL
 ```
 
-Le déploiement suit l'architecture du sujet : **un POD par livrable** (Spring, MySQL, Angular) et
-**un POD Monitoring** contenant les conteneurs Prometheus et Grafana. Si Kubernetes n'est pas activé,
+Le déploiement suit l'architecture du sujet : **un POD par livrable** (Spring, MySQL, Angular), **un POD SonarQube**
+et **un POD Monitoring** contenant les conteneurs Prometheus et Grafana. Si Kubernetes n'est pas activé,
 Jenkins livre la même application avec `docker compose` (paramètre `DEPLOY_TARGET`).
 
 | Dossier / fichier | Rôle |
 |---|---|
-| `backend/` | API REST Spring Boot 4.1 (Java 17), MySQL, Actuator + Micrometer Prometheus, JaCoCo |
+| `backend/` | API REST Spring Boot 4.1 (Java 17), MySQL, Actuator + Micrometer Prometheus, JaCoCo, client Eureka |
+| `discovery-server/` | **Microservice** registre de services **Eureka** (Spring Cloud 2025.1) |
 | `frontend/` | Angular 22, tests Vitest + couverture, image nginx |
-| `k8s/` | **Kubernetes** : PODs MySQL, Spring, Angular, Monitoring (Prometheus + Grafana) — `kubectl apply -k k8s` |
+| `k8s/` | **Kubernetes** : PODs MySQL, Eureka, Spring, Angular, Monitoring (Prometheus + Grafana) — `kubectl apply -k k8s` |
+| `k8s/sonarqube/` | **POD SonarQube** + POD PostgreSQL (NodePort 30900) — `kubectl apply -k k8s/sonarqube` |
+| `iac/terraform/` | **Terraform** (provider Docker) : réseau, volumes, images et conteneurs Jenkins / Prometheus / Grafana (+ SonarQube optionnel) |
+| `iac/ansible/` | **Ansible** : `provision.yml` (VM : Git, Java, Maven, Docker, k3s, Terraform, POD SonarQube) et `configure.yml` (configuration de SonarQube, Grafana, Jenkins via leurs API) |
 | `docker-compose.yml` | Livraison alternative sans Kubernetes : MySQL + backend + frontend |
-| `infra/docker-compose.yml` | **Outils DevOps** : Jenkins, SonarQube (+ PostgreSQL), Prometheus, Grafana |
+| `infra/docker-compose.yml` | **Outils DevOps** : Jenkins, Prometheus, Grafana, ngrok (profil) — SonarQube en Docker disponible avec le profil `sonar-docker` |
 | `infra/jenkins/` | Image Jenkins (JDK 21, Node 24, Docker CLI) + plugins + **Configuration as Code** (job créé automatiquement) |
 | `infra/sonar/sonar-init.sh` | Configure SonarQube automatiquement (mot de passe admin, token Jenkins, webhook Quality Gate) |
 | `infra/ubuntu-vm/setup-ubuntu.sh` | Installe toute la chaîne dans une **VM Ubuntu sur VMware** (architecture du sujet) |
@@ -70,21 +79,24 @@ git clone https://github.com/aymenmelk/3C-ACC2-AymenMelki.git
 cd 3C-ACC2-AymenMelki
 ```
 
-### 2. Lancer les outils DevOps (Jenkins + SonarQube + Prometheus + Grafana)
+### 2. Lancer le POD SonarQube puis les outils DevOps
 
 ```powershell
+kubectl apply -k k8s/sonarqube
+kubectl -n sonarqube rollout status deployment/sonarqube --timeout=900s
 cd infra
-copy .env.example .env      # puis éditer .env : DOCKERHUB_TOKEN, (optionnel) SMTP_*
+copy .env.example .env      # puis éditer .env : DOCKERHUB_TOKEN, (optionnel) SMTP_*, NGROK_*
 docker compose up -d --build
 ```
 
 Le premier démarrage prend quelques minutes (téléchargement des images + plugins Jenkins).
 `sonar-init` configure SonarQube tout seul, puis Jenkins démarre déjà configuré.
+Sans Kubernetes : mettre `COMPOSE_PROFILES=sonar-docker` et `SONAR_URL=http://sonarqube:9000` dans `.env` (SonarQube en Docker, port 9000).
 
 | Outil | URL | Identifiants par défaut |
 |---|---|---|
 | Jenkins | http://localhost:8081 | `admin` / `admin` |
-| SonarQube | http://localhost:9000 | `admin` / `Admin_DevOps_2026!` |
+| SonarQube (POD) | http://localhost:30900 | `admin` / `Admin_DevOps_2026!` |
 | Prometheus | http://localhost:9090 | — |
 | Grafana | http://localhost:3000 | `admin` / `admin` |
 
@@ -96,6 +108,7 @@ Le pipeline construit, teste, analyse, crée les images, les pousse sur Docker H
 | POD | URL |
 |---|---|
 | Angular | http://localhost:30420 |
+| Eureka (discovery-server) | http://localhost:30761 — **BACKEND** doit apparaître dans « Instances currently registered » |
 | Spring Boot | http://localhost:30080/entreprise/all — santé : `/actuator/health`, métriques : `/actuator/prometheus` |
 | Grafana (POD Monitoring) | http://localhost:30300 (`admin` / `admin`) |
 | Prometheus (POD Monitoring) | http://localhost:30090 |
@@ -146,26 +159,68 @@ docker compose up -d --build
 |---|---|
 | Checkout | `checkout scm` |
 | Maven : clean → compile → test → package → install | `./mvnw clean`, `compile`, `test` (rapports JUnit + JaCoCo), `package`, `install` |
+| Microservice: discovery-server | `./mvnw clean install` du registre Eureka (tests + JaCoCo) |
 | Frontend | `npm ci`, `npm run test:ci` (Vitest + lcov), `npm run build` |
 | SonarQube | `npx @sonar/scan` (lit `sonar-project.properties`) |
 | Quality Gate | `waitForQualityGate` (webhook Sonar → Jenkins créé automatiquement) |
-| Docker build | `aymenbay/aymenmelki-3c-acc2-gestionprojets-{backend,frontend}:<build>` + `latest` |
+| Docker build | `aymenbay/aymenmelki-3c-acc2-gestionprojets-{backend,frontend,discovery}:<build>` + `latest` |
 | Docker push | Docker Hub (identifiants `dockerhub-creds` depuis `infra/.env`) |
 | Select deploy target | `auto` : Kubernetes s'il est joignable, sinon docker compose |
-| Deploy: Kubernetes | `kubectl apply -k k8s` avec le tag du build + `rollout status` des 4 PODs |
+| Deploy: Kubernetes | `kubectl apply -k k8s` avec le tag du build + `rollout status` des PODs |
 | Deploy: docker compose | alternative : `docker compose up -d` |
-| Smoke test | santé Spring, API, frontend + proxy `/api`, métriques, Grafana et Prometheus |
+| Smoke test | santé Spring, API, frontend + proxy `/api`, métriques, enregistrement dans Eureka, Grafana et Prometheus |
 | Notification | e-mail si `NOTIFY_EMAIL` + `SMTP_*` sont renseignés |
 
 ### Améliorations du sujet réalisées
 
-- ✅ Notification e-mail Jenkins (Gmail : utiliser un *mot de passe d'application*)
-- ✅ Webhook : trigger `githubPush()` dans le Jenkinsfile. Jenkins tournant en local, exposez-le avec **ngrok** :
-  `ngrok http 8081`, puis GitHub → Settings → Webhooks → `https://<id>.ngrok-free.app/github-webhook/` (content type `application/json`)
-- ✅ **Kubernetes** : PODs Spring, MySQL, Angular et Monitoring, déployés par Jenkins (`kubectl`)
-- ✅ IaC : Jenkins entièrement configuré par code (JCasC + Job DSL), SonarQube configuré par script, Grafana provisionné
-- ✅ Partie Angular déployée dans un conteneur Docker (nginx)
-- ✅ CI GitHub Actions qui rejoue la même chaîne de bout en bout
+| Amélioration | Réalisation |
+|---|---|
+| **Kubernetes** | PODs Spring, MySQL, Angular, Eureka, Monitoring et **SonarQube**, déployés par Jenkins (`kubectl`) |
+| **Angular dans un conteneur** | image nginx, proxy `/api` vers le POD Spring |
+| **Microservices** | microservice `discovery-server` (registre **Eureka**, guide *service-registration-and-discovery*) ; le backend s'y enregistre |
+| **IaC — Terraform** | `iac/terraform` : les conteneurs Docker de la chaîne (Jenkins, Prometheus, Grafana, SonarQube optionnel) |
+| **IaC — Ansible** | `iac/ansible/provision.yml` prépare la VM ; `configure.yml` configure les outils dans les conteneurs (SonarQube, Grafana, Jenkins) |
+| **Webhook + ngrok + Jenkins distant** | profil `ngrok` : URL publique fixe vers Jenkins ; webhook GitHub `…/github-webhook/` → build à chaque `git push` |
+| **Notification e-mail** | Jenkins envoie le résultat de chaque build (Gmail, mot de passe d'application) |
+| **Jenkins as Code** | JCasC + Job DSL : utilisateur, credentials, SonarQube, e-mail et job créés automatiquement |
+| **CI GitHub Actions** | rejoue toute la chaîne : tests, Docker, Kubernetes (kind), Terraform + Ansible, Jenkinsfile réel |
+
+### 🧱 IaC : Terraform + Ansible (dans la VM)
+
+```bash
+# 1. Ansible prépare la VM (Git, Java, Maven, Docker, k3s, Terraform, POD SonarQube)
+cd ~/3C-ACC2-AymenMelki/iac/ansible && ansible-playbook provision.yml -K
+
+# 2. Terraform crée les conteneurs de la chaîne (alternative à docker compose : arrêter compose avant)
+cd ../terraform && cp terraform.tfvars.example terraform.tfvars   # token Docker Hub...
+terraform init && terraform apply
+
+# 3. Ansible configure les outils dans les conteneurs (projet + Quality Gate SonarQube, Grafana, Jenkins)
+cd ../ansible && ansible-playbook configure.yml
+```
+
+### 🌍 Webhook GitHub via ngrok (Jenkins distant)
+
+1. Compte gratuit https://dashboard.ngrok.com : copier l'**Authtoken** et créer le **domaine statique** gratuit.
+2. Dans `infra/.env` :
+   ```
+   COMPOSE_PROFILES=ngrok
+   NGROK_AUTHTOKEN=...
+   NGROK_DOMAIN=xxxx.ngrok-free.app
+   JENKINS_URL=https://xxxx.ngrok-free.app/
+   ```
+3. `docker compose up -d` → Jenkins est accessible de partout sur `https://xxxx.ngrok-free.app`.
+4. GitHub → repo → *Settings → Webhooks → Add webhook* : `https://xxxx.ngrok-free.app/github-webhook/`, `application/json`, *Just the push event*.
+
+### ✉️ Notifications e-mail
+
+Dans `infra/.env` (Gmail : validation en 2 étapes + mot de passe d'application) puis `docker compose up -d jenkins` :
+```
+NOTIFY_EMAIL=vous@gmail.com
+SMTP_USER=vous@gmail.com
+SMTP_PASSWORD=<mot de passe d'application>
+SMTP_FROM=vous@gmail.com
+```
 
 ---
 
@@ -178,6 +233,7 @@ docker compose up -d --build
 | Backend — JPA | Requêtes dérivées des repositories (`@DataJpaTest`, H2) | |
 | Backend — intégration | Contexte complet + H2 (mode MySQL) : CRUD, affectations, actuator | |
 | Frontend | 4 services HTTP + 4 pages + composant racine (39 tests) | `cd frontend && npm run test:ci` |
+| discovery-server | registre Eureka + santé (`@SpringBootTest`) | `cd discovery-server && ./mvnw test` |
 
 Rapports de couverture : `backend/target/site/jacoco/index.html` et `frontend/coverage/frontend/lcov-report/index.html`.
 
