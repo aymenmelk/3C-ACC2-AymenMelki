@@ -3,7 +3,7 @@
 [![CI](https://github.com/aymenmelk/3C-ACC2-AymenMelki/actions/workflows/ci.yml/badge.svg)](https://github.com/aymenmelk/3C-ACC2-AymenMelki/actions/workflows/ci.yml)
 
 Chaîne DevOps complète autour d'une application **Spring Boot 4 + Angular 22** de gestion de projets
-(Entreprises, Équipes, Projets, Projets détaillés) : **Maven → Git → SonarQube → Jenkins → Docker (Spring + MySQL) → Grafana**.
+(Entreprises, Équipes, Projets, Projets détaillés) : **Maven → Git → SonarQube → Jenkins → Docker Hub → Kubernetes (PODs Spring, MySQL, Angular, Monitoring) → Grafana**.
 
 | | |
 |---|---|
@@ -22,18 +22,23 @@ GitHub ──(poll / webhook)──▶ Jenkins ──▶ mvnw clean/compile/test
                                 │      ──▶ npm ci / test:ci / build
                                 │      ──▶ SonarQube (+ Quality Gate, couverture JaCoCo + lcov)
                                 │      ──▶ docker build ──▶ Docker Hub
-                                └──────▶ docker compose up ──▶ MySQL 8.4 + Spring Boot (8080) + Angular/nginx (4200)
-                                                                        │ /actuator/prometheus
-                                                 Prometheus (9090) ◀────┘  ◀── Jenkins /prometheus
-                                                        │
-                                                 Grafana (3000) — dashboard « Projet DevOps » provisionné
+                                └──────▶ kubectl apply -k k8s ──▶ Kubernetes (namespace gestionprojets)
+                                                                   ├─ POD MySQL 8.4 (+ volume persistant)
+                                                                   ├─ POD Spring Boot   :30080
+                                                                   ├─ POD Angular/nginx :30420  (/api → Spring)
+                                                                   └─ POD Monitoring : Prometheus :30090 + Grafana :30300
 ```
+
+Le déploiement suit l'architecture du sujet : **un POD par livrable** (Spring, MySQL, Angular) et
+**un POD Monitoring** contenant les conteneurs Prometheus et Grafana. Si Kubernetes n'est pas activé,
+Jenkins livre la même application avec `docker compose` (paramètre `DEPLOY_TARGET`).
 
 | Dossier / fichier | Rôle |
 |---|---|
 | `backend/` | API REST Spring Boot 4.1 (Java 17), MySQL, Actuator + Micrometer Prometheus, JaCoCo |
 | `frontend/` | Angular 22, tests Vitest + couverture, image nginx |
-| `docker-compose.yml` | **Livraison continue** : MySQL + backend + frontend |
+| `k8s/` | **Kubernetes** : PODs MySQL, Spring, Angular, Monitoring (Prometheus + Grafana) — `kubectl apply -k k8s` |
+| `docker-compose.yml` | Livraison alternative sans Kubernetes : MySQL + backend + frontend |
 | `infra/docker-compose.yml` | **Outils DevOps** : Jenkins, SonarQube (+ PostgreSQL), Prometheus, Grafana |
 | `infra/jenkins/` | Image Jenkins (JDK 21, Node 24, Docker CLI) + plugins + **Configuration as Code** (job créé automatiquement) |
 | `infra/sonar/sonar-init.sh` | Configure SonarQube automatiquement (mot de passe admin, token Jenkins, webhook Quality Gate) |
@@ -45,7 +50,9 @@ GitHub ──(poll / webhook)──▶ Jenkins ──▶ mvnw clean/compile/test
 
 ## ⚙️ Prérequis (Windows)
 
-- **Docker Desktop** (backend WSL2) avec **≥ 6 Go de RAM** (Settings → Resources) — SonarQube est gourmand
+- **Docker Desktop** (backend WSL2) avec **≥ 8 Go de RAM** (Settings → Resources) — SonarQube est gourmand
+- **Kubernetes activé dans Docker Desktop** : Settings → Kubernetes → *Enable Kubernetes* (type **kubeadm**) → Apply & restart.
+  Vérifier : `kubectl get nodes` → `docker-desktop   Ready`
 - **Git**
 - Pour lancer sans Docker uniquement : JDK 17+ et Node ≥ 22.22 / 24.15
 
@@ -83,18 +90,26 @@ Le premier démarrage prend quelques minutes (téléchargement des images + plug
 ### 3. Lancer le pipeline
 
 Jenkins → job **`gestionprojets-pipeline`** → **Build Now**.
-Le pipeline construit, teste, analyse, crée les images, les pousse sur Docker Hub puis **déploie** l'application :
+Le pipeline construit, teste, analyse, crée les images, les pousse sur Docker Hub puis **déploie sur Kubernetes** :
 
-- Frontend : http://localhost:4200
-- Backend : http://localhost:8080/entreprise/all
-- Santé / métriques : http://localhost:8080/actuator/health, http://localhost:8080/actuator/prometheus
-- MySQL : `localhost:3307` (3307 car un MySQL local occupe souvent 3306)
+| POD | URL |
+|---|---|
+| Angular | http://localhost:30420 |
+| Spring Boot | http://localhost:30080/entreprise/all — santé : `/actuator/health`, métriques : `/actuator/prometheus` |
+| Grafana (POD Monitoring) | http://localhost:30300 (`admin` / `admin`) |
+| Prometheus (POD Monitoring) | http://localhost:30090 |
+
+```powershell
+kubectl -n gestionprojets get pods,svc     # les PODs et services
+```
+
+Sans Kubernetes (`DEPLOY_TARGET=docker-compose`) : frontend http://localhost:4200, backend http://localhost:8080, MySQL `localhost:3307`.
 
 Ensuite le job vérifie GitHub toutes les 5 minutes (`pollSCM`) : chaque `git push` relance la chaîne.
 
 ### 4. Monitoring
 
-Grafana → Dashboards → **DevOps → « Projet DevOps — Gestion des Projets »** :
+Grafana (POD Monitoring : http://localhost:30300, ou http://localhost:3000 côté outils) → Dashboards → **DevOps → « Projet DevOps — Gestion des Projets »** :
 requêtes HTTP/s, latence p95, erreurs 5xx, mémoire JVM, threads, connexions MySQL (HikariCP), état et durée des builds Jenkins.
 
 ### Lancer seulement l'application (sans Jenkins)
@@ -116,8 +131,10 @@ docker compose up -d --build
 | Quality Gate | `waitForQualityGate` (webhook Sonar → Jenkins créé automatiquement) |
 | Docker build | `aymenbay/aymenmelki-3c-acc2-gestionprojets-{backend,frontend}:<build>` + `latest` |
 | Docker push | Docker Hub (identifiants `dockerhub-creds` depuis `infra/.env`) |
-| Deploy | `docker compose up -d` (Spring + MySQL + Angular) |
-| Smoke test | `/actuator/health`, `/entreprise/all`, frontend, métriques Prometheus |
+| Select deploy target | `auto` : Kubernetes s'il est joignable, sinon docker compose |
+| Deploy: Kubernetes | `kubectl apply -k k8s` avec le tag du build + `rollout status` des 4 PODs |
+| Deploy: docker compose | alternative : `docker compose up -d` |
+| Smoke test | santé Spring, API, frontend + proxy `/api`, métriques, Grafana et Prometheus |
 | Notification | e-mail si `NOTIFY_EMAIL` + `SMTP_*` sont renseignés |
 
 ### Améliorations du sujet réalisées
@@ -125,6 +142,7 @@ docker compose up -d --build
 - ✅ Notification e-mail Jenkins (Gmail : utiliser un *mot de passe d'application*)
 - ✅ Webhook : trigger `githubPush()` dans le Jenkinsfile. Jenkins tournant en local, exposez-le avec **ngrok** :
   `ngrok http 8081`, puis GitHub → Settings → Webhooks → `https://<id>.ngrok-free.app/github-webhook/` (content type `application/json`)
+- ✅ **Kubernetes** : PODs Spring, MySQL, Angular et Monitoring, déployés par Jenkins (`kubectl`)
 - ✅ IaC : Jenkins entièrement configuré par code (JCasC + Job DSL), SonarQube configuré par script, Grafana provisionné
 - ✅ Partie Angular déployée dans un conteneur Docker (nginx)
 - ✅ CI GitHub Actions qui rejoue la même chaîne de bout en bout
@@ -218,6 +236,8 @@ Endpoints de supervision : `/actuator/health`, `/actuator/info`, `/actuator/metr
 | Port déjà utilisé (3306/8080/…) | Changer le port côté hôte dans le `docker-compose.yml` (ex. `MYSQL_HOST_PORT`) |
 | `docker push` échoue → build UNSTABLE | Renseigner `DOCKERHUB_TOKEN` dans `infra/.env` puis `docker compose up -d jenkins` |
 | Repo GitHub privé | Rendre le repo public, ou ajouter des identifiants GitHub au job |
+| Jenkins déploie avec docker compose au lieu de Kubernetes | Kubernetes non activé/joignable : vérifier `kubectl get nodes`, puis `docker compose up -d jenkins` dans `infra` |
+| Un POD ne démarre pas | `kubectl -n gestionprojets get pods` puis `kubectl -n gestionprojets logs deploy/backend` |
 
 ---
 

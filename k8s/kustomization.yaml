@@ -1,0 +1,28 @@
+# Déploiement Kubernetes complet :  kubectl apply -k k8s
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: gestionprojets
+
+resources:
+  - namespace.yaml
+  - mysql.yaml
+  - backend.yaml
+  - frontend.yaml
+  - monitoring/monitoring.yaml
+
+configMapGenerator:
+  - name: prometheus-config
+    files: [monitoring/prometheus.yml]
+  - name: grafana-datasources
+    files: [monitoring/datasource.yml]
+  - name: grafana-dashboard-providers
+    files: [monitoring/dashboards.yml]
+  - name: grafana-dashboards
+    files: [monitoring/gestionprojets-devops.json]
+
+# Jenkins replaces "latest" with the build number at deploy time
+images:
+  - name: aymenbay/aymenmelki-3c-acc2-gestionprojets-backend
+    newTag: latest
+  - name: aymenbay/aymenmelki-3c-acc2-gestionprojets-frontend
+    newTag: latest

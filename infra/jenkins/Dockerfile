@@ -1,4 +1,4 @@
-# Jenkins with everything the pipeline needs: JDK 21, Node 24 (Angular 22), Docker CLI + compose
+# Jenkins with everything the pipeline needs: JDK 21, Node 24 (Angular 22), Docker CLI + compose, kubectl
 FROM jenkins/jenkins:lts-jdk21
 
 USER root
@@ -9,7 +9,10 @@ RUN apt-get update \
  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian $(. /etc/os-release && echo "$VERSION_CODENAME") stable" > /etc/apt/sources.list.d/docker.list \
  && curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
  && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin docker-buildx-plugin nodejs \
- && rm -rf /var/lib/apt/lists/*
+ && rm -rf /var/lib/apt/lists/* \
+ && ARCH="$(dpkg --print-architecture)" \
+ && curl -fsSL -o /usr/local/bin/kubectl "https://dl.k8s.io/release/$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/linux/${ARCH}/kubectl" \
+ && chmod +x /usr/local/bin/kubectl
 
 # Plugins + Configuration as Code (no setup wizard)
 ENV JAVA_OPTS="-Djenkins.install.runSetupWizard=false" \

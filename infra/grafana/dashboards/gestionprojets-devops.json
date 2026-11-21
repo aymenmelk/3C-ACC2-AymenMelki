@@ -45,7 +45,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "up{job=\"spring-backend\"}",
+          "expr": "max(up{job=\"spring-backend\"})",
           "legendFormat": ""
         }
       ],

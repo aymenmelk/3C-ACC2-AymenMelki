@@ -75,8 +75,14 @@ services:
       - jenkins_home:/var/jenkins_home
       - jenkins_secrets:/var/jenkins_secrets:ro
       - /var/run/docker.sock:/var/run/docker.sock
+      # Docker Desktop Kubernetes credentials (read-only) for the "Deploy: Kubernetes" stage
+      - ~/.kube:/root/.kube-host:ro
+    environment:
+      KUBECONFIG_SRC: /root/.kube-host/config
+      KUBE_CONTEXT: ${KUBE_CONTEXT:-docker-desktop}
     extra_hosts:
       - "host.docker.internal:host-gateway"
+      - "kubernetes.docker.internal:host-gateway"
 
   prometheus:
     image: prom/prometheus:v3.5.0

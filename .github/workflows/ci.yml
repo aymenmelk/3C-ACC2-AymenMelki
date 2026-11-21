@@ -60,11 +60,55 @@ jobs:
           curl -fsS -X POST localhost:8080/entreprise/add -H 'Content-Type: application/json' -d '{"nom":"Esprit","adresse":"Tunis"}'; echo
           curl -fsS localhost:8080/entreprise/all | grep -q Esprit && echo "MySQL persistence OK"
           curl -fsS -o /dev/null localhost:4200 && echo "Frontend OK"
+          curl -fsS localhost:4200/api/entreprise/all | grep -q Esprit && echo "Frontend -> backend proxy OK"
           curl -fsS localhost:8080/actuator/prometheus | grep -q http_server_requests && echo "Prometheus metrics OK"
       - if: failure()
         run: docker compose logs --tail=200
       - if: always()
         run: docker compose down -v
+
+  kubernetes:
+    name: Kubernetes (kind) - PODs Spring, MySQL, Angular, Monitoring
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build images
+        run: |
+          docker build -t aymenbay/aymenmelki-3c-acc2-gestionprojets-backend:ci  ./backend
+          docker build -t aymenbay/aymenmelki-3c-acc2-gestionprojets-frontend:ci ./frontend
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: devops
+      - name: Load images into the cluster and deploy (kubectl apply -k k8s)
+        run: |
+          kind load docker-image --name devops aymenbay/aymenmelki-3c-acc2-gestionprojets-backend:ci aymenbay/aymenmelki-3c-acc2-gestionprojets-frontend:ci
+          sed -i 's#newTag: latest#newTag: ci#' k8s/kustomization.yaml
+          kubectl apply -k k8s
+          kubectl -n gestionprojets rollout status deployment/mysql --timeout=300s
+          kubectl -n gestionprojets rollout status deployment/backend --timeout=600s
+          kubectl -n gestionprojets rollout status deployment/frontend --timeout=300s
+          kubectl -n gestionprojets rollout status deployment/monitoring --timeout=300s
+          kubectl -n gestionprojets get pods,svc,pvc -o wide
+      - name: Smoke test the PODs
+        run: |
+          kubectl -n gestionprojets port-forward svc/frontend 18080:80 >/dev/null 2>&1 &
+          kubectl -n gestionprojets port-forward svc/backend 18081:8080 >/dev/null 2>&1 &
+          kubectl -n gestionprojets port-forward svc/prometheus 19090:9090 >/dev/null 2>&1 &
+          kubectl -n gestionprojets port-forward svc/grafana 13000:3000 >/dev/null 2>&1 &
+          sleep 8
+          curl -fsS localhost:18081/actuator/health; echo
+          curl -fsS -X POST localhost:18080/api/entreprise/add -H 'Content-Type: application/json' -d '{"nom":"K8s","adresse":"Tunis"}'; echo
+          curl -fsS localhost:18080/api/entreprise/all | grep -q K8s && echo "Angular POD -> Spring POD -> MySQL POD OK"
+          curl -fsS localhost:13000/api/health; echo
+          sleep 25
+          curl -fsS 'localhost:19090/api/v1/query?query=up{job="spring-backend"}' | tee /dev/stderr | grep -q '"1"' && echo "Prometheus scrapes the Spring POD"
+          curl -fsS -u admin:admin localhost:13000/api/dashboards/uid/gestionprojets-devops | grep -q gestionprojets-devops && echo "Grafana dashboard OK"
+      - if: failure()
+        run: |
+          kubectl -n gestionprojets get pods -o wide
+          kubectl -n gestionprojets describe pods | tail -100
+          kubectl -n gestionprojets logs deployment/backend --tail=100 || true
 
   devops-toolchain:
     name: Jenkins + SonarQube + Grafana end-to-end (runs the real Jenkinsfile)

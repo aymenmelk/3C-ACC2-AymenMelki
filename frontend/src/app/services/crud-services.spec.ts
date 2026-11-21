@@ -7,7 +7,7 @@ import { ProjetService } from './projet.service';
 import { ProjetDetailleService } from './projet-detaille.service';
 import { EntrepriseService } from './entreprise.service';
 
-const API = 'http://localhost:8080';
+const API = '/api';
 
 describe('CRUD services', () => {
   let http: HttpTestingController;

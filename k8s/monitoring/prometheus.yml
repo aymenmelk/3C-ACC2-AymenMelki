@@ -1,0 +1,21 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # Spring Boot POD, through its Kubernetes service
+  - job_name: spring-backend
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["backend:8080"]
+        labels:
+          app: gestionprojets-backend
+
+  # Jenkins runs in Docker next to the cluster (Docker Desktop resolves host.docker.internal)
+  - job_name: jenkins
+    metrics_path: /prometheus/
+    static_configs:
+      - targets: ["host.docker.internal:8081"]

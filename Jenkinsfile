@@ -1,5 +1,5 @@
 // Projet DevOps — Aymen Melki — 3C-ACC2
-// Maven -> Tests -> SonarQube -> Docker (Spring + MySQL + Angular) -> Deploy -> Monitoring (Prometheus/Grafana)
+// Maven -> Tests -> SonarQube -> Docker -> Kubernetes PODs (Spring, MySQL, Angular, Monitoring Prometheus+Grafana)
 pipeline {
     agent any
 
@@ -18,7 +18,8 @@ pipeline {
 
     parameters {
         booleanParam(name: 'PUSH_IMAGES', defaultValue: true, description: 'Push the images to Docker Hub')
-        booleanParam(name: 'DEPLOY', defaultValue: true, description: 'Deploy with docker compose after the build')
+        choice(name: 'DEPLOY_TARGET', choices: ['auto', 'kubernetes', 'docker-compose', 'none'],
+               description: 'auto = Kubernetes (Docker Desktop) when reachable, otherwise docker compose')
     }
 
     environment {
@@ -30,6 +31,7 @@ pipeline {
         FRONTEND_IMG = "${HUB_USER}/${IMAGE_PREFIX}-frontend"
         IMAGE_TAG    = "${env.BUILD_NUMBER}"
         APP_URL      = "http://${env.APP_HOST ?: 'localhost'}"
+        K8S_NS       = 'gestionprojets'
     }
 
     stages {
@@ -119,7 +121,7 @@ pipeline {
         }
 
         stage('Docker: push to Docker Hub') {
-            when { expression { params.PUSH_IMAGES } }
+            when { expression { params.PUSH_IMAGES != false } }
             steps {
                 // A missing/invalid Docker Hub token marks the build UNSTABLE instead of failing it
                 catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
@@ -138,31 +140,89 @@ pipeline {
             post { always { sh 'docker logout || true' } }
         }
 
-        stage('Deploy (docker compose: Spring + MySQL + Angular)') {
-            when { expression { params.DEPLOY } }
+        stage('Select deploy target') {
+            when { expression { (params.DEPLOY_TARGET ?: 'auto') != 'none' } }
+            steps {
+                script {
+                    def target = params.DEPLOY_TARGET ?: 'auto'
+                    def k8sOk = sh(returnStatus: true, script: '''
+                        sh k8s/jenkins-kubeconfig.sh "$WORKSPACE/.kubeconfig" &&
+                        kubectl --kubeconfig "$WORKSPACE/.kubeconfig" --context "${KUBE_CONTEXT:-docker-desktop}" \
+                                --request-timeout=10s get nodes
+                    ''') == 0
+                    if (target == 'auto') {
+                        target = k8sOk ? 'kubernetes' : 'docker-compose'
+                    } else if (target == 'kubernetes' && !k8sOk) {
+                        error 'Kubernetes is not reachable: enable it in Docker Desktop (Settings > Kubernetes)'
+                    }
+                    env.DEPLOY_MODE = target
+                    echo "Deploy target: ${env.DEPLOY_MODE}"
+                }
+            }
+        }
+
+        stage('Deploy: Kubernetes (PODs)') {
+            when { expression { env.DEPLOY_MODE == 'kubernetes' } }
+            steps {
+                sh '''
+                    export KUBECONFIG="$WORKSPACE/.kubeconfig"
+                    K="kubectl --context ${KUBE_CONTEXT:-docker-desktop}"
+
+                    # Free the ports/RAM of a previous docker compose delivery (its data volume is kept)
+                    docker compose -f docker-compose.yml down || true
+
+                    # Deploy exactly the images built (and pushed) by this build
+                    sed -i "s#aymenbay/aymenmelki#${HUB_USER}/aymenmelki#g; s#newTag: latest#newTag: ${IMAGE_TAG}#" k8s/kustomization.yaml
+                    $K apply -k k8s
+
+                    $K -n "$K8S_NS" rollout status deployment/mysql      --timeout=300s
+                    $K -n "$K8S_NS" rollout status deployment/backend    --timeout=600s
+                    $K -n "$K8S_NS" rollout status deployment/frontend   --timeout=300s
+                    $K -n "$K8S_NS" rollout status deployment/monitoring --timeout=300s
+                    $K -n "$K8S_NS" get pods,svc -o wide
+                '''
+                script {
+                    env.BACKEND_URL  = "${env.APP_URL}:30080"
+                    env.FRONTEND_URL = "${env.APP_URL}:30420"
+                }
+            }
+        }
+
+        stage('Deploy: docker compose') {
+            when { expression { env.DEPLOY_MODE == 'docker-compose' } }
             steps {
                 sh '''
                     export DOCKERHUB_USER="$HUB_USER" IMAGE_TAG="$IMAGE_TAG"
                     docker compose -f docker-compose.yml up -d --no-build --force-recreate --remove-orphans
                     docker compose -f docker-compose.yml ps
                 '''
+                script {
+                    env.BACKEND_URL  = "${env.APP_URL}:8080"
+                    env.FRONTEND_URL = "${env.APP_URL}:4200"
+                }
             }
         }
 
         stage('Smoke test') {
-            when { expression { params.DEPLOY } }
+            when { expression { ['kubernetes', 'docker-compose'].contains(env.DEPLOY_MODE) } }
             steps {
                 sh '''
+                    echo "Testing the $DEPLOY_MODE deployment: backend $BACKEND_URL, frontend $FRONTEND_URL"
                     for i in $(seq 1 40); do
-                        if curl -fs "$APP_URL:8080/actuator/health" | grep -q '"status":"UP"'; then
+                        if curl -fs "$BACKEND_URL/actuator/health" | grep -q '"status":"UP"'; then
                             echo "Backend UP"; break
                         fi
                         echo "waiting for backend ($i/40)..."; sleep 5
                     done
-                    curl -fs "$APP_URL:8080/actuator/health"
-                    curl -fs "$APP_URL:8080/entreprise/all"
-                    curl -fs -o /dev/null "$APP_URL:4200" && echo "Frontend UP"
-                    curl -fs "$APP_URL:8080/actuator/prometheus" | grep -q http_server_requests && echo "Prometheus metrics OK"
+                    curl -fs "$BACKEND_URL/actuator/health"; echo
+                    curl -fs "$BACKEND_URL/entreprise/all"; echo
+                    curl -fs -o /dev/null "$FRONTEND_URL" && echo "Frontend UP"
+                    curl -fs -o /dev/null "$FRONTEND_URL/api/entreprise/all" && echo "Frontend -> backend proxy OK"
+                    curl -fs "$BACKEND_URL/actuator/prometheus" | grep -q http_server_requests && echo "Prometheus metrics OK"
+                    if [ "$DEPLOY_MODE" = "kubernetes" ]; then
+                        curl -fs "$APP_URL:30300/api/health" && echo " Grafana POD OK"
+                        curl -fs "$APP_URL:30090/-/ready" && echo " Prometheus POD OK"
+                    fi
                 '''
             }
         }
